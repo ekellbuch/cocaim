@@ -82,7 +82,8 @@ def svd_patch(M,k=1,tsub=1,noise_norm=True,iterate=True,confidence=0.90,corr=Tru
         Yd = combine_blocks(dimsM, Yds, dimsMc)
     # Plot ranks
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1,dtype='int')
-        Cn = cn_ranks_plot(dimsMc, ranks, dimsM[:2])
+        # plot ranks box
+        #Cn = cn_ranks_plot(dimsMc, ranks, dimsM[:2])
         print('M rank {}'.format(sum(ranks)))
         rlen = sum(ranks)
     else:
