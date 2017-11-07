@@ -222,7 +222,7 @@ def compress_dblocks(data_in, tsub=1, noise_norm=False, iterate=False, confidenc
     else:
         Yd_out =  Yd_patch
 
-    plot_en = True
+    plot_en = False
 
     if plot_en:
         maxlag=20
@@ -234,7 +234,7 @@ def compress_dblocks(data_in, tsub=1, noise_norm=False, iterate=False, confidenc
             vi = (vi-vi.mean())/vi.std()
             metric = axcov(vi,maxlag)[maxlag:]/vi.var()
             #axarr[0].plot(c1, metric.mean(),'.')
-            axarr[0].plot(metric,':')
+            axarr[0].plot(metric,':k')
             #c1 = c1+1
 
         c2 = 0
@@ -242,7 +242,7 @@ def compress_dblocks(data_in, tsub=1, noise_norm=False, iterate=False, confidenc
             vi = Vt1[lost,:]
             vi = (vi-vi.mean())/vi.std()
             metric = axcov(vi,maxlag)[maxlag:]/vi.var()
-            axarr[1].plot(metric,':')
+            axarr[1].plot(metric,':k')
 
         axarr[0].set_xscale('symlog')
         axarr[1].set_xscale('symlog')
