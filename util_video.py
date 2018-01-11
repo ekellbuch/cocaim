@@ -19,7 +19,7 @@ def video_normalization(Y,smin=True,dmax=True):
 
     Yout = np.copy(Y)
     if smin is True:
-        Yout = Yout-Yout.min()
+        Yout = Yout-Yout.min()+1
     if dmax is True:
         Yout = np.true_divide(Yout,Yout.max())
     return Yout
@@ -47,7 +47,7 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
     if isinstance(gains,int):
         gains = np.ones(shape=(num_rows,num_cols))
     else:
-        print ('gains were given')
+        print('gains were given')
 
    # Initialize subplot list
     ims = [None]*num_plots
@@ -86,7 +86,11 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
 
     gs1.update(wspace =0.1, hspace =0)
     # remove if empty
-    ims = filter(None, ims)
+
+    def remove_empty(x):
+        return np.any(x)
+
+    ims = list(filter(remove_empty,ims))
 
     # Write animator function
     def animate(frame):
@@ -104,7 +108,7 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
         num_frames = num_tframe
     else:
         num_frames = min(max_time,num_tframe)
-    print 'Making {} frames'.format(num_frames)
+    print('Making {} frames'.format(num_frames))
 
     return animation.FuncAnimation(fig, animate, frames=range(num_frames), interval=30, blit=True)
 
@@ -112,7 +116,61 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
 def draw_video(anim, fps=10, store=False, name='tmp.mp4'):
     if store:
         anim.save(name, fps=fps,extra_args=['-vcodec', 'libx264'])
-        video = open(name, "rb").read()
-        anim._encoded_video = video.encode("base64")
+        #video = open(name, "rb").read()
+        #anim._encoded_video = video.encode("base64")
     return HTML(anim.to_html5_video())
+
+
+def Vt_denoised_video(Vt,Vts):
+    """
+    Make video of Vt and Vts
+    Vt = num_componentx x num_timeframes
+    """
+    num_components, num_timeframes= Vt.shape
+
+    Vdiff = Vt-Vts
+
+    tts = np.arange(num_timeframes)
+
+    fig, ax = plt.subplots(2,1,figsize=(15,10))
+
+    ymax, ymin = Vt.max(), Vt.min()
+    ydmax, ydmin = Vdiff.max(), Vdiff.min()
+
+    ax[0].set_ylim(ymin,ymax)
+    ax[1].set_ylim(ydmin,ydmax)
+    l1,l2,l3=[],[],[]
+
+    l1, = ax[0].plot(tts,Vt[0,:],'b')
+    l2, = ax[0].plot(tts,Vts[0,:],'r')
+    l3, = ax[1].plot(tts,Vdiff[0,:],'r')
+
+    ax[1].legend('line')
+
+    def animate(ii):
+        l1.set_ydata(Vt[ii,:])
+        l2.set_ydata(Vts[ii,:])
+        l3.set_ydata(Vdiff[ii,:])
+        l3.set_label('Iter %d '%(ii))
+        #l3.set_label('Tile %d sv: %d'%(num[ii], num2[ii]))
+        ax[1].legend()
+        return l1,l2,l3
+
+
+    # Init only required for blitting to give a clean slate.
+    def init():
+        l1.set_ydata(Vt[0,:])
+        l2.set_ydata(Vts[0,:])
+        l3.set_ydata(Vdiff[0,:])
+        l1.set_label('line init')
+        ax[1].legend()
+        return l1,l2,l3
+
+
+    anim = animation.FuncAnimation(fig, animate, 
+            frames=np.arange(num_components-1), init_func=init,blit=False,
+            interval=1000)
+    # HTML(anim.to_html5_video())
+    # anim.save('traces_Vt_Vtd.mp4',fps=5,extra_args=['-vcodec','libx264'])
+    return anim
 
