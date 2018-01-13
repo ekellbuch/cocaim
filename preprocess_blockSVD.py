@@ -177,7 +177,7 @@ def axcov(data, maxlag=10):
 def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=False,fudge_factor=1.,mean_th=None,
-        mean_th_factor=1.):
+        mean_th_factor=1.,U_update=True):
     """
     Apply svd to k patches of M
     tsub: temporal decimation
@@ -196,7 +196,8 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
         Yds, vtids = compress_patches(patches, maxlag=maxlag, tsub=tsub,
                 noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
-                greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor)
+                greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
+                U_update=U_update)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -207,10 +208,11 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
         rlen = sum(ranks)
     else:
         print('Single patch')
-        Yd, vtids = compress_dblocks(M,maxlag=maxlag,tsub=tsub,
-                noise_norm=noise_norm,iterate=iterate,confidence=confidence,
-                corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
-                greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor)
+        Yd, vtids = compress_dblocks(M.reshape((np.prod(dimsM[:2]),dimsM[2]),order='F'),
+                maxlag=maxlag,tsub=tsub, noise_norm=noise_norm,iterate=iterate,
+                confidence=confidence, corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,
+                mean_th=mean_th, greedy=greedy,fudge_factor=fudge_factor,
+                mean_th_factor=mean_th_factor, U_update=U_update)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
         if not np.any(ranks):
@@ -242,9 +244,12 @@ def split_image_into_blocks(image, number_of_blocks=16):
 
 def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
         iterate=False, confidence=0.90,corr=True,kurto=False,tfilt=False,
-        tfide=False, share_th=True,greedy=False,fudge_factor=1.,mean_th_factor=1.):
+        tfide=False, share_th=True,greedy=False,fudge_factor=1.,
+        mean_th_factor=1.,U_update=True):
     """
     Compress each patch
+    patches is a list of d1xd2xT arrays
+    assume a patch is a list of patches
     """
     # For any given patch
     k = len(patches)
@@ -257,34 +262,81 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
     vtids = np.zeros(shape=(k,3,dxy))*np.nan
 
     # Apply function to each patch
-    # Define same mean_th for all patches, we assume T is the same
     if corr==True and share_th==True:
-        #print('Calculating shared threshold')
         mean_th = covCI_wnoise(T,confidence=confidence,maxlag=maxlag)
-        #print('Large components mean_th*2')
         mean_th*=mean_th_factor
     else:
         mean_th = None
-    for cpatch in np.arange(k):
-        if cpatch %10 ==0:
+    for cpatch, data_in in enumerate(patches):
+        if cpatch %1 ==0:
             print('Patch %d'%cpatch)
-        data_in = patches[cpatch]
-        #print('Tile {}'.format(cpatch))
         start = time.time()
-        Yd_patch, keep1 = compress_dblocks(data_in,maxlag=maxlag,tsub=tsub,
-                noise_norm=noise_norm, iterate=iterate,confidence=confidence,
-                corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
-                greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.)
-        Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
+        try:
+            dims_ = data_in.shape
+            data_in = data_in.reshape((np.prod(dims_[:2]),dims_[2]), order='F')
+            Yd_patch, keep1 = compress_dblocks(data_in,dims=dims_,maxlag=maxlag,tsub=tsub,
+                    noise_norm=noise_norm, iterate=iterate,confidence=confidence,
+                    corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
+                    greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.,
+                    U_update=U_update)
+            Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
+            print('Rank is %d'%len(keep1))
+        except:
+            print('Could not run patch %d'%cpatch)
         print('\tPatch %d run for %.f'%(cpatch,time.time()-start))
         if np.any(keep1):
             vtids[cpatch] = pad(keep1, (3, dxy), (0, 0))
     return Yds, vtids
 
 
-def denoise_dblocks(Y, V_hat, dims=None, fudge_factor=1.,
+def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
+        verbose=False,plot_en=False):
+    """
+    Run update for each vi wrt given lambdas_
+    """
+    num_components, T = V_TF_.shape
+    # difference operator
+    diff = (np.diag(2*np.ones(T),0)+np.diag(-1*np.ones(T-1),1)+
+            np.diag(-1*np.ones(T-1),-1))[1:T-1]
+
+    # normalize each U st each component has unit L2 norm
+    U_hat_n = preprocessing.normalize(U_hat_, norm='l2', axis=0)
+
+    V_TF_2 = np.zeros(V_TF_.shape)
+    #V_TF_2 = V_TF_.copy()
+
+    for ii in range(num_components):
+        # get idx of other components
+        idx_ = np.setdiff1d(np.arange(num_components),ii)
+        # subtract off the other components from Y
+        R_ = Y - U_hat_[:,idx_].dot(V_TF_[idx_,:])
+        # project U_i onto the residual
+        V_ = U_hat_n[:,ii].T.dot(R_)
+        V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+        if lambdas_ is not None:
+            V_2 = c_update_V(V_, diff, lambdas_[ii])
+        else:
+            # normalize
+            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+            # Estimate sigma_i
+            noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:], method='logmexp')
+            print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
+            V_2 = c_l1tf_v_hat(V_,diff,noise_std_)[0]
+        V_TF_2[ii,:] = V_2.copy() # use updated?
+        #V_TF_2[ii,:] = preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
+        if plot_en:
+            plt.figure(figsize=(10,5))
+            plt.plot(V_,':')
+            plt.plot(V_2,':')
+            plt.show()
+    # normalize each V to have unit L2 norm.
+    V_TF_2 = preprocessing.normalize(V_TF_2, norm='l2')
+    return V_TF_2
+
+
+def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         maxlag=10, confidence=0.95, corr=True, mean_th=None,
-        kurto=False,verbose=False,plot_en=False):
+        kurto=False, verbose=True,plot_en=True,U_update=True):
     """
     Greedy approach for denoising
     Inputs
@@ -298,6 +350,9 @@ def denoise_dblocks(Y, V_hat, dims=None, fudge_factor=1.,
     corr
     kurto
     mean_th
+    U_update: enforce L1 constraint on the spatial components
+    verbose
+    plot_en
 
     Outputs
     -------
@@ -308,206 +363,155 @@ def denoise_dblocks(Y, V_hat, dims=None, fudge_factor=1.,
     T = V_hat.shape[1]
     diff = (np.diag(2*np.ones(T),0)+np.diag(-1*np.ones(T-1),1)+
             np.diag(-1*np.ones(T-1),-1))[1:T-1]
-
     #V_hat = preprocessing.normalize(V_hat, norm='l2')
     # Counting
     rerun_1 = 1 # flag to run part (1)
     iteration = 0 # iteration # for part(1)
 
-    while rerun_1:
-        ### update V and initialize lambdas:
-        num_components = V_hat.shape[0]
-        if verbose:
-            print('*Running Part (1) iter %d with %d components'%(iteration, num_components))
+    if plot_en:
+        for idx, Vt_ in enumerate(V_hat):
+            plt.title('Temporal component %d'%idx)
+            plt.plot(Vt_)
+            plt.show()
+     # Plot U
+    if plot_en and (not dims==None):
+        tmp_u= Y.dot(V_hat.T).T#V_hat.dot(Y.T)
+        for ii in range(U_hat.shape[1]):
+            plot_comp(U_hat[:,ii],tmp_u[ii,:],'Spatial component U,Y*Vt,R'+str(ii), dims[:2])
 
-        #estimate noise coefficient sigma_i for component i
+    #####################################################
+    while rerun_1:
+        ##############
+        ### Initialize lambda_i and update V_i component(s):
+        num_components = V_hat.shape[0]
+        print('*Running Part (1) iter %d with %d components'
+                %(iteration, num_components)) if verbose else 0
+
+        #estimate noise coefficient sigma_i for temporal component i
         noise_std_ = sp_filters.noise_estimator(V_hat, method='logmexp')
         noise_std_ *= fudge_factor
 
-        if False:
-            for idx, Vt_ in enumerate(V_hat):
-                plt.title('Temporal component %d'%idx)
-                plt.plot(Vt_)
-                plt.show()
-
-        if verbose:
-            print('solve V(i) = argmin_W ||D^2 W||_1 \n'
-                +'\t st ||V_i-W||_2<fudge_factor*sigma_i*sqrt(T)')
+        print('solve V(i) = argmin_W ||D^2 W||_1 \n'
+                +'\t st ||V_i-W||_2<fudge_factor*sigma_i*sqrt(T)')if verbose else 0
         outs_ = [c_l1tf_v_hat(V_hat[idx,:], diff, stdv)
                  for idx, stdv in enumerate(noise_std_)]
-        # record corresponding lagrange multipliers lambda_i's
         V_TF, lambdas_ = map(np.asarray, zip(*np.asarray(outs_)))
         #print('V_TF %f %f'%(V_TF.min(),V_TF.max()))
         #print('lambdas %f %f'%(lambdas_.min(),lambdas_.max()))
-
-        #for idx, Vt_ in enumerate(V_hat):
+        if plot_en:
+            for idx, Vt_ in enumerate(V_TF):
+                plt.title('Temporal component %d'%idx)
+                plt.plot(V_hat[idx,:])
+                plt.plot(Vt_)
+                plt.show()
 
         # normalize each V to have unit L2 norm.
         V_TF = preprocessing.normalize(V_TF, norm='l2')
         #print('V_TF %f %f'%(V_TF.min(),V_TF.max()))
+        ####################
+        ### Initialize nu_j and update U_j for pixel j:
+        if U_update:
+            print('solve U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T*fudge^2') if verbose else 0
+            outs_2 = [c_l1_u_hat(y, V_TF,fudge_factor) for y in Y]
+            #outs_2 = update_U_parallel(Y,V_TF,fudge_factor)
+            U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
+        else:
+            nus_= np.zeros((U_hat.shape[0],))
 
-        if False:
-            for idx, Vt_ in enumerate(V_hat):
-                plt.title('Temporal component %d'%idx)
-                plt.plot(Vt_)
-                plt.show()
+        # Plot U
+        if plot_en and (not dims==None):
+            tmp_u= Y.dot(V_TF.T).T#V_TF.dot(Y.T)
+            for ii in range(U_hat.shape[1]):
+                plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
-        ### update U and initialize nus for pixel j
-        if verbose:
-            print('solve U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T*fudge^2')
-        #
-        outs_2 = [c_l1_u_hat(y, V_TF,fudge_factor) for y in Y]
-        #outs_2 = update_u_parallel(Y,V_TF,fudge_factor)
-        # record the corresponding lagrange multipliers nu_j's
-        U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
-        #print('U_hat %f %f'%(U_hat.min(),U_hat.max()))
-        #print('nus %f %f'%(nus_.min(),nus_.max()))
-
-        # Iterations
+        #################### Iterations
         num_min_iter = 5
-        if verbose:
-            print('Iterate until F(U,V) stops decreasing significantly')
-            print('For now fixed iterations as %d'%num_min_iter)
-        U_hat_ = U_hat.copy()
-        V_TF_ = V_TF.copy()
-        F_UVs =[]
+        print('Iterate until F(U,V) stops decreasing significantly') if verbose else 0
+        print('For now fixed iterations as %d'%num_min_iter) if verbose else 0
+        F_UVs = []
 
         for k in range(num_min_iter):
-            # normalize each U st each component has unit L2 norm
-            U_hat_n = preprocessing.normalize(U_hat_, norm='l2', axis=0)
+            print('*Running Part (1) of iter %d with %d components'%(iteration, num_components)) if verbose else 0
 
-            #print('\tU_hat_ %f %f'%(U_hat.min(),U_hat_.max()))
-            #print('\tV_TF_ %f %f'%(V_TF_.min(),V_TF_.max()))
-            #print('\tY %f %f'%(Y.min(),Y.max()))
-            if verbose:
-                print('\tupdate V_i : min ||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1')
+            print('\tupdate V_i : min ||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1') if verbose else 0
+            V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_,plot_en=plot_en,verbose=verbose)
 
-            V_TF_2 = np.zeros(V_TF_.shape)
-            for ii in range(num_components):
-                # get idx of other components
-                idx_ = np.setdiff1d(np.arange(num_components),ii)
-                # subtract off the other components from Y
-                R_ = Y - U_hat_[:,idx_].dot(V_TF_[idx_,:])
-                # project U_i onto the residual
-                V_ = U_hat_n[:,ii].T.dot(R_)
-                V_2 = c_update_V(V_, diff, lambdas_[ii])
-                V_TF_2[ii,:] = V_2.copy() # use updated?
+            if U_update:
+                print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
+                #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
+                U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
 
-                if plot_en:
-                    plt.figure(figsize=(10,5))
-                    plt.plot(V_,':')
-                    plt.plot(V_2,':')
-                    plt.show()
+            # Plot U
+            if plot_en and (not dims==None):
+                tmp_u= Y.dot(V_TF.T).T#V_hat.dot(Y.T)
+                for ii in range(U_hat.shape[1]):
+                    plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component Y*V_TF, U, R'+str(ii), dims[:2])
 
-            # normalize each V to have unit L2 norm.
-            V_TF_ = preprocessing.normalize(V_TF_2, norm='l2')
-            if verbose:
-                print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1')
-            #(run a bunch of lasso solves in parallel.)
-            #U_hat_ = np.asarray([c_update_U(y,V_TF_,nus_[idx]) for idx, y in enumerate(Y)])
-            U_hat_ = np.asarray(c_update_U_parallel(Y,V_TF_,nus_))
 
             # F(U,V)=||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1 + sum_j nu_j ||U_j||_1
             # due to normalization F(U,V) may not decrease monotonically. problem?
-            F_uv1 = np.linalg.norm(Y - U_hat_.dot(V_TF_),2)**2
-            F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF_.T)),0))
-            F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat_),1))
-            F_uv = F_uv1+ F_uv2 + F_uv3
-
+            F_uv1 = np.linalg.norm(Y - U_hat.dot(V_TF),2)**2
+            F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF.T)),0))
+            F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat),1)) if U_update else 0
+            F_uv = F_uv1 + F_uv2 + F_uv3
             F_UVs.append(F_uv)
-            if verbose:
-                print('\tIter %d errors (%d+%d+%d)=%d'%(k,F_uv1,F_uv2,F_uv3,F_uv))
+            print('\tIter %d errors (%d+%d+%d)=%d'%(k,F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
+
+            #plot_comp(Y,U_hat.dot(V_TF),'Y-Yd-RPixel variance', dims) if (plot_en and(not dims ==None)) else 0
 
         if plot_en:
             plt.title('Error F(u,v)')
             plt.plot(F_UVs)
             plt.show()
 
-        if verbose:
-            print('*Running Part (2) iter %d with %d components'%(iteration, num_components))
+        print('*Running Part (2) of iter %d with %d components'%(iteration, V_TF.shape[0])) if verbose else 0
 
-        ### (2) Compute PCA on residual R; - UV
-        # If any big correlated components add them to U and V and go to part 1
-        Y_hat =  U_hat_.dot(V_TF_)
-
-        if plot_en and (not dims == None):
-            plot_comp(Y,Y_hat,'Frame 0', dims, idx_=0)
-
-        R = Y - Y_hat
-        R = R.astype('float32')
-        _, _, Vt_r = compute_svd(R, method='vanilla')
+        ### (2) Compute PCA on residual R  and check for correlated components
+        _, _, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
         # For greedy approach, only keep big highly correlated components
         ctid = choose_rank(Vt_r, maxlag=maxlag, confidence=confidence,
                        corr=corr, kurto=kurto, mean_th=mean_th)
         keep1_r = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-
-        #print('Residual components')
-        #print(keep1_r)
-        if plot_en: # debug
-            plot_vt_cov(Vt_r,keep1_r,maxlag)
-
+        plot_vt_cov(Vt_r,keep1_r,maxlag) if plot_en else 0
         if len(keep1_r)==0:
-            if verbose:
-                print('Don\'t need to iterate')
-                print('Final number of components %d',V_TF_.shape[0])
+            print('Final number of components %d'%V_TF.shape[0]) if verbose else 0
             rerun_1 = 0
         else:
-            if verbose:
-                print('Iterate (1) since adding %d components'%len(keep1_r))
+            print('Iterate (1) since adding %d components'%(len(keep1_r))) if verbose else 0
             rerun_1 = 1
-            V_hat = np.vstack((V_TF_, Vt_r[keep1_r,:]))
+            V_hat = np.vstack((V_TF, Vt_r[keep1_r,:]))
             iteration +=1
-
     ### Final update
-    if verbose:
-        print('Running final update')
-    V_TF_2 = V_TF_.copy()
-    U_hat_n = preprocessing.normalize(U_hat_, norm='l2', axis=0)
+    print('Running final update') if verbose else 0
+    V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
+    if U_update:
+        print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
+        outs_ = [c_l1_u_hat(y,V_TF,1) for y in Y]
+        U_hat, _ = map(np.asarray,zip(*np.asarray(outs_)))
+    else:
+        U_hat = Y.dot(np.linalg.pinv(V_TF))
 
-    for ii in range(num_components):
-        # get idx of other components
-        idx_ = np.setdiff1d(np.arange(num_components),ii)
-        #subtract off the other components from Y, 
-        R_ = Y - U_hat_[:,idx_].dot(V_TF_2[idx_,:])
-        #then project U_i onto the residual to init V(i), 
-        V_ = U_hat_n[:,ii].T.dot(R_)
+    #plot_comp(Y,U_hat.dot(V_TF),'Frame 0', dims, idx_=0) if (plot_en and(not dims ==None)) else 0
+    # Plot U
+    if plot_en and (not dims==None):
+        tmp_u= Y.dot(V_TF.T).T#V_TF.dot(Y.T)
+        for ii in range(U_hat.shape[1]):
+            plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component Y*V_TF, U_hat, R'+str(ii), dims[:2])
 
-        # normalize
-        V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
-
-        # Estimate sigma_i
-        noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:], method='logmexp')
-        #noise_std_ *= fudge_factor
-        if verbose:
-            print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)')
-        V_2 = c_l1tf_v_hat(V_,diff,noise_std_)[0]
-
-        if False:
-            plt.figure(figsize=(10,5))
-            plt.plot(V_,':')
-            plt.plot(V_2,':')
-            plt.show()
-
-        V_TF_2[ii,:] = V_2.copy()
-
-    if verbose:
-        print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T')
-    outs_ = [c_l1_u_hat(y,V_TF_2,fudge_factor) for y in Y]
-    U_hat, _ = map(np.asarray,zip(*np.asarray(outs_)))
-
-    #Y_hat = U_hat_.dot(V_TF_)
-    # this needs to be updated to reflect any number of iterations
-    return U_hat , V_TF_2
+    # this needs to be updated to reflect any new rank due to new numb of iterations
+    return U_hat , V_TF
 
 
-def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate=False,
-        confidence=0.90,corr=True,kurto=False, tfilt=False, tfide=False, mean_th=None,
-        greedy=False, mean_th_factor=1.,p=1.,fudge_factor=1.):
+def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
+        noise_norm=False, iterate=False, confidence=0.90,corr=True,
+        kurto=False, tfilt=False, tfide=False, mean_th=None,
+        greedy=False, mean_th_factor=1.,p=1.,fudge_factor=1.,
+        plot_en=True,verbose=True,U_update=False):
     """
     Compress a single block
     Inputs
     ------
-    data_in:    video (d1 x d2 x T)
+    data_all:    video (d x T) or (d1 xd2 x T)
     maxlag:     max_corr lag
     tsub:       temporal downsample
     ds:         spatial downsample
@@ -527,15 +531,16 @@ def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate
     Yd_out:     Denoised video (dxT)
     ctids:      component matrix (corr-kurto-reject)
     """
-    dims = data_in.shape
-    data_all = data_in.reshape((np.prod(dims[:2]),dims[2]), order='F').T
-
+    if data_all.ndim ==3:
+        dims = data_all.shape
+        data_all = data_all.reshape((np.prod(dims[:2]),dims[2]), order='F')
+    data_all = data_all.T
     # In a 2d matrix, we get rid of any broke (inf) pixels
     # we assume fixed broken across time
     broken_idx = np.isinf(data_all[0,:])
     # Work only on good pixels
-    if any(broken_idx):
-        print('broken pixels')
+    if np.any(broken_idx):
+        print('broken pixels') if verbose else 0
         data = data_all[:, ~broken_idx]
     else:
         data = data_all.copy()
@@ -546,7 +551,7 @@ def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate
 
     # temporally filter the data
     if tfilt:
-        print('Apply exponential filter')
+        print('Apply exponential filter') if verbose else 0
         data0 = np.zeros(data.shape)
         #T, num_pxls = data.shape
         for ii, trace in enumerate(data.T):
@@ -560,16 +565,16 @@ def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate
 
     # temporally decimate the data
     if tsub > 1:
-        print('Temporal decimation %d'%tsub)
+        print('Temporal decimation %d'%tsub) if verbose else 0
         data0 = temporal_decimation(data0, tsub)
 
     # spatially decimate the data
     if ds > 1:
-        print('Spatial decimation %d'%ds)
-        D = len(dims)
-        ds = np.ones(D-1).astype('uint8')
-        data0 = spatial_decimation(data0, ds, dims)
-
+        print('Spatial decimation %d'%ds) if verbose else 0
+        #D = len(dims)
+        #ds = np.ones(D-1).astype('uint8')
+        #data0 = spatial_decimation(data0, ds, dims)
+        data0 = data0.copy()
     # Run svd
     U, s, Vt = compute_svd(data0.T, method='vanilla')
 
@@ -592,8 +597,7 @@ def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate
     keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
 
     # Plot temporal correlations
-    if 0: #debug
-        plot_vt_cov(Vt,keep1,maxlag)
+    plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
 
     # If no components to store, return block as it is
     if np.all(keep1 == np.nan):
@@ -616,16 +620,20 @@ def compress_dblocks(data_in, maxlag=10, tsub=1, ds=1, noise_norm=False, iterate
     # call greedy
     if greedy:
         start = time.time()
-        U, Vt = denoise_dblocks(data.T, Vt, dims=dims,
-                fudge_factor=fudge_factor, maxlag=maxlag,
-                confidence=confidence, corr=corr,
-                kurto=kurto, mean_th=mean_th)
+        try:
+            U, Vt = denoise_dblocks(data.T, U, Vt, dims=dims,
+                    fudge_factor=fudge_factor, maxlag=maxlag,
+                    confidence=confidence, corr=corr,
+                    kurto=kurto, mean_th=mean_th,U_update=U_update)
+        except:
+            print('ERROR: Greedy solving failed, using default parameters')
+
         #print('\t\tGreedy run for %.f'%(time.time()-start))
     # Reconstuct matrix and add mean
     Yd = U.dot(Vt) + mu.T
     # return original matrix and add any broken pixels
     if broken_idx.sum() > 0:
-        print('There are {} broken pixels.'.format(broken_idx.sum()))
+        print('ERROR: There are {} broken pixels.'.format(broken_idx.sum()))
         Yd_out = np.ones(shape=data_all.shape).T*np.inf
         Yd_out[~broken_idx,:] = Yd
     else:
@@ -671,12 +679,12 @@ def compute_svd(M, method='randomized', n_components=400):
         U, s, Vt = np.linalg.svd(M, full_matrices=False)
     elif method == 'randomized':
         U, s, Vt = randomized_svd(M, n_components=n_components,
-                                  n_iter=7, random_state=None)
+                n_iter=7, random_state=None)
     return U, s, Vt
 
 
 def choose_rank(Vt,maxlag=10,iterate=False,confidence=0.90,
-        corr=True,kurto=False,mean_th=None,mean_th_factor=1.):
+        corr=True,kurto=False,mean_th=None,mean_th_factor=1.,min_rank=0):
     """
     Select rank wrt axcov and kurtosis
     """
@@ -688,7 +696,7 @@ def choose_rank(Vt,maxlag=10,iterate=False,confidence=0.90,
         if mean_th is None:
             mean_th = covCI_wnoise(L,confidence=confidence,maxlag=maxlag)
         mean_th*= mean_th_factor
-        keep1 = cov_one(Vt, mean_th = mean_th, maxlag=maxlag, iterate=iterate)
+        keep1 = cov_one(Vt, mean_th = mean_th, maxlag=maxlag, iterate=iterate,min_rank=min_rank)
     else:
         keep1 = []
     if kurto is True:
@@ -755,7 +763,8 @@ def spatial_decimation(data,ds,dims):
     data0  = data.copy()
     return data0
 
-def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=True,
+
+def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=False,
         extra=1,min_rank=0,verbose=False):
     """
     Compute only auto covariance,
@@ -774,7 +783,6 @@ def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=True,
             if iterate is True:
                 break
         else:
-            #print('cov_mean %f'%vi_cov.mean())
             keep.append(vector)
     #print(keep)
     #if not keep:
@@ -830,15 +838,16 @@ def unpad(x):
     return x
 
 
-def combine_blocks(dimsM, Mc, dimsMc=None,list_order='C',
-        array_order='F'):
+def combine_blocks(dimsM, Mc, dimsMc=None,
+        list_order='C', array_order='F'):
     """
     Reshape blocks given by compress_blocks
     list order 'F' or 'C' : if Mc as list, assumes order is in such format
     array order if dxT instead of d1xd2xT assumes always array_order='F'
+    NOTE: if dimsMC is NONE then MC must be a d1 x d2 x T matrix
     """
+
     d1, d2, T = dimsM
-    #k = Mc.shape[0]
     if type(Mc)==list:
         k = len(Mc)
     elif type(Mc)==np.ndarray:# or type(Mc)==np.array:
@@ -851,7 +860,7 @@ def combine_blocks(dimsM, Mc, dimsMc=None,list_order='C',
     if dimsMc is None:
         dimsMc = np.asarray(list(map(np.shape,Mc)))
     i, j = 0, 0
-    for ii, Mn in enumerate(Mc):#range(0, k):
+    for ii, Mn in enumerate(Mc):
         # shape of current block
         d1c, d2c, Tc = dimsMc[ii]
         if (np.isnan(Mn).any()):
@@ -936,16 +945,13 @@ def c_l1tf_v_hat(v,diff,sigma):
     Include optimal lagrande multiplier for constraint
     """
     T = len(v)
-    #v = cp.Constant(v)
-    #diff = cp.Constant(diff)
-    #sigma = cp.Constant(sigma)
     v_hat = cp.Variable(T)
     objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
     constraints = [cp.norm(v-v_hat,2)<=sigma*np.sqrt(T)]
     cp.Problem(objective, constraints).solve(solver='CVXOPT')#verbose=False)
     return v_hat.value, constraints[0].dual_value
 
-def c_l1_u_hat(y,V_TF,fudge_factor):
+def c_l1_u_hat(y,V_TF,fudge_factor,regression=True):
     """
     U(j) = argmin_W ||W||_1
     st ||Y_j-W'V_TF(j)||_2^2 < T
@@ -956,11 +962,11 @@ def c_l1_u_hat(y,V_TF,fudge_factor):
     u_hat = cp.Variable((1,num_components))
     objective = cp.Minimize(cp.norm(u_hat,1))
     constraints = [cp.norm(
-        y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2) <= np.sqrt(len(y))*fudge_factor]
+        y[np.newaxis,:] - cp.matmul(u_hat,V_TF),2) <= np.sqrt(len(y))*fudge_factor]
     problem = cp.Problem(objective,constraints)
     problem.solve(solver='CVXOPT')
     if problem.status in ["infeasible", "unbounded"]:
-        return y.dot(np.linalg.pinv(V_TF)), 0
+        return y[np.newaxis,:].dot(np.linalg.pinv(V_TF)).flatten(), 0
     else:
         return u_hat.value.flatten(), constraints[0].dual_value
 
@@ -972,11 +978,16 @@ def c_update_V(v,diff,lambda_):
     min ||v-v_hat||_2^2 + lambda_i||D^2V_i||_1
     """
     v_hat = cp.Variable(len(v))
-    objective = cp.Minimize(
-        cp.norm(v-v_hat,2)**2
-        + lambda_*cp.norm(cp.matmul(diff,v_hat),1))
+    if lambda_ == 0:
+        objective = cp.Minimize(
+            cp.norm(v-v_hat,2)**2)
+    else:
+        objective = cp.Minimize(
+            cp.norm(v-v_hat,2)**2
+            + lambda_*cp.norm(cp.matmul(diff,v_hat),1))
     cp.Problem(objective).solve(solver='CVXOPT')
     return v_hat.value
+
 
 def c_update_U(y,V_TF,nu_):
     """
@@ -987,9 +998,14 @@ def c_update_U(y,V_TF,nu_):
     num_components = V_TF.shape[0]
     u_hat = cp.Variable((1,num_components))
 
-    objective = cp.Minimize(
-            cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2
-            + nu_*cp.norm(u_hat,1))
+    if nu_ == 0:
+        objective = cp.Minimize(
+                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2)
+    else:
+        objective = cp.minimize(
+                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,v_tf),2)**2
+                + nu_*cp.norm(u_hat,1))
+        #print(nu_*cp.norm(u_hat,1))
     problem = cp.Problem(objective)
     problem.solve(solver='CVXOPT')
     return u_hat.value.flatten()
@@ -1005,7 +1021,11 @@ def plot_comp(Y,Y_hat,title_,dims,idx_=0):
     ax[0].set_title(title_)
 
     for ax_ , arr in zip (ax,[Y,Y_hat,R]):
-        ims = ax_.imshow(arr.reshape(dims,order='F')[:,:,idx_])
+        if len(dims)>2:
+            ims = ax_.imshow(arr.reshape(dims,order='F')[:,:,idx_])
+        else:
+            ims = ax_.imshow(arr.reshape(dims,order='F'))
+        #ims = ax_.imshow(arr.reshape(dims,order='F').var(2))
         d = make_axes_locatable(ax_)
         cax0 = d.append_axes("bottom", size="5%", pad=0.5)
         cbar0 = plt.colorbar(ims, cax=cax0, orientation='horizontal',format='%.0e')
@@ -1016,6 +1036,7 @@ def plot_comp(Y,Y_hat,title_,dims,idx_=0):
 ###################
 # Additional Functions for 4 offgrid denoisers
 ###################
+
 
 def pyramid_function(dims):
     """
@@ -1037,6 +1058,7 @@ def pyramid_function(dims):
     a_k = np.array([a_k,]*dims[2]).transpose([1,2,0])
     return a_k
 
+
 def compute_ak(dims_rs,W_rs,list_order='C'):
     """
     Get ak pyramid matrix wrt center
@@ -1057,7 +1079,10 @@ def compute_ak(dims_rs,W_rs,list_order='C'):
     return a_k
 
 
-def denoisers_off_grid(W,k,maxlag=10,confidence=0.95):
+def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
+        iterate=False, confidence=0.95,corr=True,kurto=False,
+        tfilt=False,tfide=False, share_th=True,greedy=False,
+        fudge_factor=1., mean_th_factor=1.,U_update=True):
     """
     WORK IN PROGRESS ---
     Calculate four denoisers st each denoiser is in a new grid,
@@ -1108,12 +1133,8 @@ def denoisers_off_grid(W,k,maxlag=10,confidence=0.95):
     dims_cs = W[col_cut[0]:col_cut[-1],:,:].shape
     dims_rcs = W[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:].shape
 
-    # get pyramid functions for each grid
-    ak0 = np.zeros(W.shape)
-    ak1 = np.zeros(W.shape)
-    ak2 = np.zeros(W.shape)
-    ak3 = np.zeros(W.shape)
-
+    # Get pyramid functions for each grid
+    ak0,ak1,ak2,ak3 = [np.zeros(W.shape)]*4
     ak0 = compute_ak(W.shape,patches,list_order='C')
     ak1[:,row_cut[0]:row_cut[-1],:] = compute_ak(dims_rs,W_rs,list_order='F')
     ak2[col_cut[0]:col_cut[-1],:,:] = compute_ak(dims_cs,W_cs,list_order='F')
@@ -1132,7 +1153,21 @@ def denoisers_off_grid(W,k,maxlag=10,confidence=0.95):
     for patch in patches:
         Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
         dpatch.append(Yd)
+        #Yds, vtids = compress_patches(patches, maxlag=maxlag, tsub=tsub,
+        #        noise_norm=noise_norm, iterate=iterate,confidence=confidence,
+        #        corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
+        #        greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
+        #        U_update=U_update)
+        Yd = combine_blocks(dimsM, Yds, dimsMc)
+        ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
+        # Plot ranks Box
+        plot_en = True #debug
+        if plot_en:
+            Cn = cn_ranks_plot(dim_block, ranks, dimsM[:2])
+        print('M rank {}'.format(sum(ranks)))
+        rlen = sum(ranks)
 
+##
     dW_rs = []
     for patch in W_rs:
         print(patch.shape)
@@ -1151,10 +1186,7 @@ def denoisers_off_grid(W,k,maxlag=10,confidence=0.95):
         Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
         dW_rcs.append(Yd)
 
-    W0 = np.zeros(W.shape)
-    W1 = np.zeros(W.shape)
-    W2 = np.zeros(W.shape)
-    W3 = np.zeros(W.shape)
+    W0,W1,W2, W3 = [np.zeros(W.shape)]*4
 
     W0 = combine_blocks(W.shape,patches,list_order='C')
     W1[:,row_cut[0]:row_cut[-1],:] = combine_blocks(dims_rs,dW_rs,list_order='F')
@@ -1180,12 +1212,12 @@ def update_u_parallel(Y,V_TF,fudge_factor):
     return c_outs
 
 
-def c_update_U_parallel(Y,V_TF_,nus_):
+def c_update_U_parallel(Y,V_TF,nus_):
     """
     call c_update_U as queue
     """
     pool = multiprocessing.Pool()#processes=20)
-    args = [(y,V_TF_,nus_[idx]) for idx, y in enumerate(Y)]
+    args = [(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)]
     c_outs = pool.starmap(c_update_U, args)
 
     pool.close()
