@@ -302,9 +302,8 @@ def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
     # normalize each U st each component has unit L2 norm
     U_hat_n = preprocessing.normalize(U_hat_, norm='l2', axis=0)
 
-    V_TF_2 = np.zeros(V_TF_.shape)
-    #V_TF_2 = V_TF_.copy()
-
+    #V_TF_2 = np.zeros(V_TF_.shape)
+    V_TF_2 = V_TF_.copy()
     for ii in range(num_components):
         # get idx of other components
         idx_ = np.setdiff1d(np.arange(num_components),ii)
@@ -312,18 +311,26 @@ def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
         R_ = Y - U_hat_[:,idx_].dot(V_TF_[idx_,:])
         # project U_i onto the residual
         V_ = U_hat_n[:,ii].T.dot(R_)
-        V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+        #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
         if lambdas_ is not None:
+            #V_ = U_hat_n[:,ii].T.dot(R_)
+            V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
             V_2 = c_update_V(V_, diff, lambdas_[ii])
         else:
+           # V_ = U_hat_n[:,ii].T.dot(R_)
             # normalize
             #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
             # Estimate sigma_i
             noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:], method='logmexp')
-            print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
+            #print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
+            #print(noise_std_)
             V_2 = c_l1tf_v_hat(V_,diff,noise_std_)[0]
-        V_TF_2[ii,:] = V_2.copy() # use updated?
-        #V_TF_2[ii,:] = preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
+            #print('329')
+            #print(V_2)
+            #print(V_2.shape)
+            #print(V_TF_2[ii,:].shape)
+        V_TF_2[ii,:] = V_2.copy()#preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
         if plot_en:
             plt.figure(figsize=(10,5))
             plt.plot(V_,':')
@@ -382,11 +389,12 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     #####################################################
     while rerun_1:
         ##############
+        #V_hat= preprocessing.normalize(U_hat.T.dot(Y),norm='l2',axis=1)
+        ##############
         ### Initialize lambda_i and update V_i component(s):
         num_components = V_hat.shape[0]
         print('*Running Part (1) iter %d with %d components'
                 %(iteration, num_components)) if verbose else 0
-
         #estimate noise coefficient sigma_i for temporal component i
         noise_std_ = sp_filters.noise_estimator(V_hat, method='logmexp')
         noise_std_ *= fudge_factor
@@ -404,7 +412,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 plt.plot(V_hat[idx,:])
                 plt.plot(Vt_)
                 plt.show()
-
+        #print(lambdas_)
         # normalize each V to have unit L2 norm.
         V_TF = preprocessing.normalize(V_TF, norm='l2')
         #print('V_TF %f %f'%(V_TF.min(),V_TF.max()))
@@ -417,7 +425,6 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
         else:
             nus_= np.zeros((U_hat.shape[0],))
-
         # Plot U
         if plot_en and (not dims==None):
             tmp_u= Y.dot(V_TF.T).T#V_TF.dot(Y.T)
@@ -435,12 +442,10 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
 
             print('\tupdate V_i : min ||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1') if verbose else 0
             V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_,plot_en=plot_en,verbose=verbose)
-
             if U_update:
                 print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
                 #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
                 U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
-
             # Plot U
             if plot_en and (not dims==None):
                 tmp_u= Y.dot(V_TF.T).T#V_hat.dot(Y.T)
@@ -467,7 +472,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         print('*Running Part (2) of iter %d with %d components'%(iteration, V_TF.shape[0])) if verbose else 0
 
         ### (2) Compute PCA on residual R  and check for correlated components
-        _, _, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
+        U_r, _, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
         # For greedy approach, only keep big highly correlated components
         ctid = choose_rank(Vt_r, maxlag=maxlag, confidence=confidence,
                        corr=corr, kurto=kurto, mean_th=mean_th)
@@ -480,6 +485,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             print('Iterate (1) since adding %d components'%(len(keep1_r))) if verbose else 0
             rerun_1 = 1
             V_hat = np.vstack((V_TF, Vt_r[keep1_r,:]))
+            U_hat = np.hstack((U_hat,U_r[:,keep1_r]))
             iteration +=1
     ### Final update
     print('Running final update') if verbose else 0
@@ -534,7 +540,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
     if data_all.ndim ==3:
         dims = data_all.shape
         data_all = data_all.reshape((np.prod(dims[:2]),dims[2]), order='F')
-    data_all = data_all.T
+    data_all = data_all.T.astype('float32')
     # In a 2d matrix, we get rid of any broke (inf) pixels
     # we assume fixed broken across time
     broken_idx = np.isinf(data_all[0,:])
@@ -1005,7 +1011,6 @@ def c_update_U(y,V_TF,nu_):
         objective = cp.minimize(
                 cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,v_tf),2)**2
                 + nu_*cp.norm(u_hat,1))
-        #print(nu_*cp.norm(u_hat,1))
     problem = cp.Problem(objective)
     problem.solve(solver='CVXOPT')
     return u_hat.value.flatten()
