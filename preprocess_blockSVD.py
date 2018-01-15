@@ -177,7 +177,7 @@ def axcov(data, maxlag=10):
 def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=False,fudge_factor=1.,mean_th=None,
-        mean_th_factor=1.,U_update=True):
+        mean_th_factor=1.,U_update=True,min_rank=0):
     """
     Apply svd to k patches of M
     tsub: temporal decimation
@@ -197,7 +197,8 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
                 greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
-                U_update=U_update)
+                U_update=U_update,plot_en=plot_en,
+                min_rank=min_rank)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -212,7 +213,7 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 maxlag=maxlag,tsub=tsub, noise_norm=noise_norm,iterate=iterate,
                 confidence=confidence, corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,
                 mean_th=mean_th, greedy=greedy,fudge_factor=fudge_factor,
-                mean_th_factor=mean_th_factor, U_update=U_update)
+                mean_th_factor=mean_th_factor, U_update=U_update,min_rank=min_rank)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
         if not np.any(ranks):
@@ -245,7 +246,8 @@ def split_image_into_blocks(image, number_of_blocks=16):
 def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
         iterate=False, confidence=0.90,corr=True,kurto=False,tfilt=False,
         tfide=False, share_th=True,greedy=False,fudge_factor=1.,
-        mean_th_factor=1.,U_update=True):
+        mean_th_factor=1.,U_update=True,plot_en=False,
+        min_rank=0):
     """
     Compress each patch
     patches is a list of d1xd2xT arrays
@@ -278,9 +280,10 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
                     noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                     corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
                     greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.,
-                    U_update=U_update)
+                    U_update=U_update,plot_en=plot_en,
+                    min_rank=min_rank)
             Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
-            print('Rank is %d'%len(keep1))
+            #print('Rank is %d'%len(keep1))
         except:
             print('Could not run patch %d'%cpatch)
         print('\tPatch %d run for %.f'%(cpatch,time.time()-start))
@@ -289,11 +292,12 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
     return Yds, vtids
 
 
-def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
+def iterative_update_V(Y, U_hat,V_TF_,lambdas_=None,
         verbose=False,plot_en=False):
     """
     Run update for each vi wrt given lambdas_
     """
+    U_hat_ = U_hat.copy()
     num_components, T = V_TF_.shape
     # difference operator
     diff = (np.diag(2*np.ones(T),0)+np.diag(-1*np.ones(T-1),1)+
@@ -301,8 +305,6 @@ def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
 
     # normalize each U st each component has unit L2 norm
     U_hat_n = preprocessing.normalize(U_hat_, norm='l2', axis=0)
-
-    #V_TF_2 = np.zeros(V_TF_.shape)
     V_TF_2 = V_TF_.copy()
     for ii in range(num_components):
         # get idx of other components
@@ -312,25 +314,19 @@ def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
         # project U_i onto the residual
         V_ = U_hat_n[:,ii].T.dot(R_)
         #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
-        if lambdas_ is not None:
-            #V_ = U_hat_n[:,ii].T.dot(R_)
-            V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
-            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
-            V_2 = c_update_V(V_, diff, lambdas_[ii])
-        else:
-           # V_ = U_hat_n[:,ii].T.dot(R_)
-            # normalize
-            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+        if lambdas_ is None:
             # Estimate sigma_i
-            noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:], method='logmexp')
-            #print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
-            #print(noise_std_)
+            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+            noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:],
+                    method='logmexp')
+            print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
             V_2 = c_l1tf_v_hat(V_,diff,noise_std_)[0]
-            #print('329')
-            #print(V_2)
-            #print(V_2.shape)
-            #print(V_TF_2[ii,:].shape)
-        V_TF_2[ii,:] = V_2.copy()#preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
+        else: #if lambdas_[ii] is not None:
+            #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
+            # print(V_.shape)
+            V_2 = c_update_V(V_, diff, lambdas_[ii])
+        V_TF_2[ii,:] = V_2.copy()#
+        #V_TF_2[ii,:] = preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
         if plot_en:
             plt.figure(figsize=(10,5))
             plt.plot(V_,':')
@@ -343,7 +339,7 @@ def iterative_update_V(Y, U_hat_,V_TF_,lambdas_=None,
 
 def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         maxlag=10, confidence=0.95, corr=True, mean_th=None,
-        kurto=False, verbose=True,plot_en=True,U_update=True):
+        kurto=False, verbose=False,plot_en=False,U_update=True):
     """
     Greedy approach for denoising
     Inputs
@@ -370,7 +366,6 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     T = V_hat.shape[1]
     diff = (np.diag(2*np.ones(T),0)+np.diag(-1*np.ones(T-1),1)+
             np.diag(-1*np.ones(T-1),-1))[1:T-1]
-    #V_hat = preprocessing.normalize(V_hat, norm='l2')
     # Counting
     rerun_1 = 1 # flag to run part (1)
     iteration = 0 # iteration # for part(1)
@@ -389,33 +384,28 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     #####################################################
     while rerun_1:
         ##############
-        #V_hat= preprocessing.normalize(U_hat.T.dot(Y),norm='l2',axis=1)
-        ##############
         ### Initialize lambda_i and update V_i component(s):
         num_components = V_hat.shape[0]
         print('*Running Part (1) iter %d with %d components'
                 %(iteration, num_components)) if verbose else 0
-        #estimate noise coefficient sigma_i for temporal component i
-        noise_std_ = sp_filters.noise_estimator(V_hat, method='logmexp')
+        #estimate noise coefficient sigma_i for temporal component
+        #noise_std_ = np.asarray([sp_filters.noise_estimator(V_hat_[np.newaxis,:],
+        #    method='logmexp',range_ff=[0.25,0.5]) for V_hat_ in V_hat])
+        noise_std_ = sp_filters.noise_estimator(V_hat,method='logmexp')
         noise_std_ *= fudge_factor
-
         print('solve V(i) = argmin_W ||D^2 W||_1 \n'
                 +'\t st ||V_i-W||_2<fudge_factor*sigma_i*sqrt(T)')if verbose else 0
         outs_ = [c_l1tf_v_hat(V_hat[idx,:], diff, stdv)
                  for idx, stdv in enumerate(noise_std_)]
         V_TF, lambdas_ = map(np.asarray, zip(*np.asarray(outs_)))
-        #print('V_TF %f %f'%(V_TF.min(),V_TF.max()))
-        #print('lambdas %f %f'%(lambdas_.min(),lambdas_.max()))
         if plot_en:
             for idx, Vt_ in enumerate(V_TF):
                 plt.title('Temporal component %d'%idx)
                 plt.plot(V_hat[idx,:])
                 plt.plot(Vt_)
                 plt.show()
-        #print(lambdas_)
         # normalize each V to have unit L2 norm.
-        V_TF = preprocessing.normalize(V_TF, norm='l2')
-        #print('V_TF %f %f'%(V_TF.min(),V_TF.max()))
+        #V_TF = preprocessing.normalize(V_TF, norm='l2')
         ####################
         ### Initialize nu_j and update U_j for pixel j:
         if U_update:
@@ -442,11 +432,14 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
 
             print('\tupdate V_i : min ||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1') if verbose else 0
             V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_,plot_en=plot_en,verbose=verbose)
+
             if U_update:
                 print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
-                #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
-                U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
+                print(V_TF.shape)
+                U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
+                #U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
             # Plot U
+            print(U_hat.shape)
             if plot_en and (not dims==None):
                 tmp_u= Y.dot(V_TF.T).T#V_hat.dot(Y.T)
                 for ii in range(U_hat.shape[1]):
@@ -472,7 +465,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         print('*Running Part (2) of iter %d with %d components'%(iteration, V_TF.shape[0])) if verbose else 0
 
         ### (2) Compute PCA on residual R  and check for correlated components
-        U_r, _, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
+        U_r, s_r, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
         # For greedy approach, only keep big highly correlated components
         ctid = choose_rank(Vt_r, maxlag=maxlag, confidence=confidence,
                        corr=corr, kurto=kurto, mean_th=mean_th)
@@ -485,10 +478,12 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             print('Iterate (1) since adding %d components'%(len(keep1_r))) if verbose else 0
             rerun_1 = 1
             V_hat = np.vstack((V_TF, Vt_r[keep1_r,:]))
-            U_hat = np.hstack((U_hat,U_r[:,keep1_r]))
+            U_hat = np.hstack((U_hat,U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
             iteration +=1
+    ##################
     ### Final update
     print('Running final update') if verbose else 0
+    #################
     V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
     if U_update:
         print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
@@ -512,7 +507,8 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
         noise_norm=False, iterate=False, confidence=0.90,corr=True,
         kurto=False, tfilt=False, tfide=False, mean_th=None,
         greedy=False, mean_th_factor=1.,p=1.,fudge_factor=1.,
-        plot_en=True,verbose=True,U_update=False):
+        plot_en=False,verbose=False,U_update=False,
+        min_rank=0):
     """
     Compress a single block
     Inputs
@@ -599,7 +595,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
 
     ctid = choose_rank(Vt, maxlag=maxlag, iterate=iterate,
             confidence=confidence, corr=corr, kurto=kurto,
-            mean_th=mean_th)
+            mean_th=mean_th,min_rank=min_rank)
     keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
 
     # Plot temporal correlations
@@ -630,7 +626,9 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
             U, Vt = denoise_dblocks(data.T, U, Vt, dims=dims,
                     fudge_factor=fudge_factor, maxlag=maxlag,
                     confidence=confidence, corr=corr,
-                    kurto=kurto, mean_th=mean_th,U_update=U_update)
+                    kurto=kurto, mean_th=mean_th,U_update=U_update,
+                    plot_en=plot_en,verbose=verbose)
+            ctid[0,np.arange(Vt.shape[0])]=1
         except:
             print('ERROR: Greedy solving failed, using default parameters')
 
@@ -1003,14 +1001,12 @@ def c_update_U(y,V_TF,nu_):
     """
     num_components = V_TF.shape[0]
     u_hat = cp.Variable((1,num_components))
-
     if nu_ == 0:
         objective = cp.Minimize(
                 cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2)
     else:
-        objective = cp.minimize(
-                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,v_tf),2)**2
-                + nu_*cp.norm(u_hat,1))
+        objective = cp.Minimize(
+                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2+ nu_*cp.norm(u_hat,1))
     problem = cp.Problem(objective)
     problem.solve(solver='CVXOPT')
     return u_hat.value.flatten()
