@@ -177,7 +177,7 @@ def axcov(data, maxlag=10):
 def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=False,fudge_factor=1.,mean_th=None,
-        mean_th_factor=1.,U_update=True,min_rank=0):
+        mean_th_factor=1.,U_update=True,min_rank=0,verbose=False):
     """
     Apply svd to k patches of M
     tsub: temporal decimation
@@ -198,7 +198,7 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
                 greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
                 U_update=U_update,plot_en=plot_en,
-                min_rank=min_rank)
+                min_rank=min_rank,verbose=verbose)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -213,7 +213,8 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 maxlag=maxlag,tsub=tsub, noise_norm=noise_norm,iterate=iterate,
                 confidence=confidence, corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,
                 mean_th=mean_th, greedy=greedy,fudge_factor=fudge_factor,
-                mean_th_factor=mean_th_factor, U_update=U_update,min_rank=min_rank)
+                mean_th_factor=mean_th_factor, U_update=U_update,min_rank=min_rank,
+                plot_en=plot_en,verbose=verbose)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
         if not np.any(ranks):
@@ -247,7 +248,7 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
         iterate=False, confidence=0.90,corr=True,kurto=False,tfilt=False,
         tfide=False, share_th=True,greedy=False,fudge_factor=1.,
         mean_th_factor=1.,U_update=True,plot_en=False,
-        min_rank=0):
+        min_rank=0,verbose=False):
     """
     Compress each patch
     patches is a list of d1xd2xT arrays
@@ -322,8 +323,9 @@ def iterative_update_V(Y, U_hat,V_TF_,lambdas_=None,
             print('V_i = argmin_V ||D^2 V_||_1 st ||V_i-V_||_2<sigma_i*sqrt(T)') if verbose else 0
             V_2 = c_l1tf_v_hat(V_,diff,noise_std_)[0]
         else: #if lambdas_[ii] is not None:
+            #print(np.sum(V_**2))
             #V_ = preprocessing.normalize(V_[np.newaxis,:], norm='l2')[0]
-            # print(V_.shape)
+            #print(np.sum(V_**2))
             V_2 = c_update_V(V_, diff, lambdas_[ii])
         V_TF_2[ii,:] = V_2.copy()#
         #V_TF_2[ii,:] = preprocessing.normalize(V_2[np.newaxis,:], norm='l2')[0]
@@ -393,6 +395,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         #    method='logmexp',range_ff=[0.25,0.5]) for V_hat_ in V_hat])
         noise_std_ = sp_filters.noise_estimator(V_hat,method='logmexp')
         noise_std_ *= fudge_factor
+        #print(np.sum(V_hat**2,1))
         print('solve V(i) = argmin_W ||D^2 W||_1 \n'
                 +'\t st ||V_i-W||_2<fudge_factor*sigma_i*sqrt(T)')if verbose else 0
         outs_ = [c_l1tf_v_hat(V_hat[idx,:], diff, stdv)
@@ -417,7 +420,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             nus_= np.zeros((U_hat.shape[0],))
         # Plot U
         if plot_en and (not dims==None):
-            tmp_u= Y.dot(V_TF.T).T#V_TF.dot(Y.T)
+            tmp_u = Y.dot(V_TF.T).T#V_TF.dot(Y.T)
             for ii in range(U_hat.shape[1]):
                 plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
@@ -435,11 +438,9 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
 
             if U_update:
                 print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
-                print(V_TF.shape)
-                U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
-                #U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
+                #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
+                U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
             # Plot U
-            print(U_hat.shape)
             if plot_en and (not dims==None):
                 tmp_u= Y.dot(V_TF.T).T#V_hat.dot(Y.T)
                 for ii in range(U_hat.shape[1]):
@@ -1206,7 +1207,7 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
 #### trial for parallel implementation
 
 def update_u_parallel(Y,V_TF,fudge_factor):
-    pool = multiprocessing.Pool()#processes=20)
+    pool = multiprocessing.Pool(processes=20)
     c_outs = pool.starmap(c_l1_u_hat, itertools.product(y, V_TF, fudge_factor))
     pool.close()
     pool.join()
