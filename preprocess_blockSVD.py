@@ -1086,7 +1086,7 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
         tfilt=False,tfide=False, share_th=True,greedy=False,
         fudge_factor=1., mean_th_factor=1.,U_update=True):
     """
-    WORK IN PROGRESS ---
+    WORK IN PROGRESS --- vanilla implementation
     Calculate four denoisers st each denoiser is in a new grid,
     (Given original tiling grid
     each additional grid has a 1/2 offset vertically, horizontally or both.
@@ -1143,66 +1143,87 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
     ak3[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:] = compute_ak(dims_rcs,W_rcs,list_order='F')
 
     # Force outer most border = 1
-    ak0[[0,-1],[0,-1],:]=1
-
+    #ak0[[0,-1],[0,-1],:]=1
+    ak0[0,:,:]=1
+    ak0[-1,:,:]=1
+    ak0[:,0,:]=1
+    ak0[:,-1,:]=1
     # if output a bunch of lists this will take forever
     #return ak0,ak1,ak2,ak3,patches,W_rs,W_cs,W_rcs
 
     # Here are one by one
     # here we need maxlag and confidence
 
-    dpatch = []
-    for patch in patches:
-        Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
-        dpatch.append(Yd)
-        #Yds, vtids = compress_patches(patches, maxlag=maxlag, tsub=tsub,
-        #        noise_norm=noise_norm, iterate=iterate,confidence=confidence,
-        #        corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
-        #        greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
-        #        U_update=U_update)
-        Yd = combine_blocks(dimsM, Yds, dimsMc)
-        ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
-        # Plot ranks Box
-        plot_en = True #debug
-        if plot_en:
-            Cn = cn_ranks_plot(dim_block, ranks, dimsM[:2])
-        print('M rank {}'.format(sum(ranks)))
-        rlen = sum(ranks)
+    #dpatch = []
+    #for ii, patch in enumerate(patches):
+    #    Yd,_ = pre_svd.svd_patch(patch,k=1,
+    #            maxlag=maxlag,confidence=confidence,greedy=greedy,
+    #            fudge_factor=fudge_factor, mean_th_factor=mean_th_factor)
+    #    dpatch.append(Yd)
 
-##
+    Yd ,_ = svd_patch(W,k=k,maxlag=maxlag,confidence=confidence,
+            greedy=greedy,fudge_factor=fudge_factor, 
+            mean_th_factor=mean_th_factor,U_update=U_update,
+            min_rank=min_rank)
+    ##
     dW_rs = []
-    for patch in W_rs:
-        print(patch.shape)
-        Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
-        dW_rs.append(Yd)
-
+    for ii, patch in enumerate(W_rs):
+        print('running %d out of %d'%(ii,len(W_rs)))
+        start=time.time()
+        Yd1,_ = svd_patch(patch,k=1,maxlag=maxlag,
+                                 confidence=confidence,greedy=greedy,
+                                 fudge_factor=fudge_factor,
+                                 mean_th_factor=mean_th_factor,
+                                 U_update=U_update,min_rank=min_rank)
+        dW_rs.append(Yd1)
+        print('Run for %.f'%(time.time()-start))
+    ##
     dW_cs = []
-    for patch in W_cs:
-        print(patch.shape)
-        Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
-        dW_cs.append(Yd)
+    for ii, patch in enumerate(W_cs):
+        print('running %d '%ii)
+        start=time.time()
+        Yd2,_ = svd_patch(patch,k=1,maxlag=maxlag,
+                                 confidence=confidence,greedy=greedy,
+                                 fudge_factor=fudge_factor,
+                                 mean_th_factor=mean_th_factor,
+                                 U_update=U_update,min_rank=min_rank)
+        dW_cs.append(Yd2)
+        print('Run for %.f'%(time.time()-start))
+        ##
 
-    dW_rcs = []
-    for patch in W_rcs:
-        print(patch.shape)
-        Yd,_ = svd_patch(patch,k=1,maxlag=maxlag,confidence=confidence)
-        dW_rcs.append(Yd)
+    dw_rcs = []
+    for ii, patch in enumerate(w_rcs):
+        print('running %d out of %d'%(ii,len(w_rcs)))
+        start=time.time()
+        Yd3,_ = svd_patch(patch,k=1,maxlag=maxlag,
+                                 confidence=confidence,greedy=greedy,
+                                 fudge_factor=fudge_factor,
+                                 mean_th_factor=mean_th_factor,
+                                 U_update=U_update,min_rank=min_rank)
+        dw_rcs.append(Yd3)
+        print('Run for %.f'%(time.time()-start))
+    ##
+    #W0,W1,W2, W3 = [np.zeros(W.shape)]*4
+    W0 = np.zeros(W.shape)
+    W1 = np.zeros(W.shape)
+    W2 = np.zeros(W.shape)
+    W3 = np.zeros(W.shape)
 
-    W0,W1,W2, W3 = [np.zeros(W.shape)]*4
-
-    W0 = combine_blocks(W.shape,patches,list_order='C')
+    W0 = Yd.copy()#combine_blocks(W.shape,patches,list_order='C')
     W1[:,row_cut[0]:row_cut[-1],:] = combine_blocks(dims_rs,dW_rs,list_order='F')
     W2[col_cut[0]:col_cut[-1],:,:] =combine_blocks(dims_cs,dW_cs,list_order='F')
     W3[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:] = combine_blocks(dims_rcs,dW_rcs,list_order='F')
 
 
-    for ak_ in [ak0,ak1,ak2,ak3]:
-        plt.imshow(ak[:,:,0])
-        plt.show()
+    if False:
+        for ak_ in [ak0,ak1,ak2,ak3]:
+            plt.imshow(ak[:,:,0])
+            plt.show()
 
     W_hat = (ak0*W0+ak1*W1+ak2*W2+ak3*W3)/(ak0+ak1+ak2+ak3)
 
     return W_hat
+
 
 #### trial for parallel implementation
 
