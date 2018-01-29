@@ -197,7 +197,8 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
                 greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
-                U_update=U_update,plot_en=plot_en, min_rank=min_rank,verbose=verbose)
+                U_update=U_update,plot_en=plot_en,
+                min_rank=min_rank,verbose=verbose)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -213,10 +214,10 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 confidence=confidence, corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,
                 mean_th=mean_th, greedy=greedy,fudge_factor=fudge_factor,
                 mean_th_factor=mean_th_factor, U_update=U_update,min_rank=min_rank,
-                plot_en=plot_en,verbose=verbose)
+                plot_en=plot_en,verbose=verbose,dims=dimsM)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
-        if np.all(ranks== np.nan):
+        if not np.any(ranks):
             print('M rank Empty')
             rlen = 0
         else:
@@ -267,7 +268,6 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
     if corr==True and share_th==True:
         mean_th = covCI_wnoise(T,confidence=confidence,maxlag=maxlag)
         mean_th*=mean_th_factor
-        mean_th_factor=1
     else:
         mean_th = None
     for cpatch, data_in in enumerate(patches):
@@ -281,7 +281,7 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
                     noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                     corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
                     greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.,
-                    U_update=U_update,plot_en=plot_en,min_rank=min_rank, verbose=verbose)
+                    U_update=U_update,plot_en=plot_en,min_rank=min_rank)
             Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
             #print('Rank is %d'%len(keep1))
         except:
@@ -424,7 +424,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
         #################### Iterations
-        num_min_iter = 5 #update from cte
+        num_min_iter = 5
         print('Iterate until F(U,V) stops decreasing significantly') if verbose else 0
         print('For now fixed iterations as %d'%num_min_iter) if verbose else 0
         F_UVs = []
@@ -455,7 +455,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             F_UVs.append(F_uv)
             print('\tIter %d errors (%d+%d+%d)=%d'%(k,F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
 
-            if k >=1 and np.abs(F_uv - F_UVs[k-1]) <= 1: # update from cte
+            if k >=1 and np.abs(F_uv - F_UVs[k-1]) <= 1: #will need to update this cte
                 print('Stopped at iteration %d since there are no significant updates!'%k) if verbose else 0
                 break
 
@@ -607,14 +607,9 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
 
     # If no components to store, return block as it is
     if np.all(keep1 == np.nan):
-        if min_rank == 0:
-            Yd = np.zeros(data.T.shape)
-            Yd += mu.T
-            return Yd, ctid
-        else:
-            keep1 = np.arange(min_rank)
-            greedy = False
-            ctid[0,keep1]=1
+        Yd = np.zeros(data.T.shape)
+        Yd += mu.T
+        return Yd, ctid
 
     Vt = Vt[keep1,:]
 

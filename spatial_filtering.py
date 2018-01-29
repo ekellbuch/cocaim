@@ -76,7 +76,7 @@ def spatial_filter_image(Y_new, gHalf=[2,2], sn=None):
 
     k_hats=[]
     for pixel in np.arange(n_pixels):
-        if pixel % 1e3==0:
+        if pixel % 1e2==0:
             print('first k pixels %d'%pixel)
         ij = np.unravel_index(pixel,d[:2])
         for c, i in enumerate(ij):
