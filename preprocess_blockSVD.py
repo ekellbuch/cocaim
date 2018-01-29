@@ -197,8 +197,7 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
                 greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
-                U_update=U_update,plot_en=plot_en,
-                min_rank=min_rank,verbose=verbose)
+                U_update=U_update,plot_en=plot_en, min_rank=min_rank,verbose=verbose)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -217,7 +216,7 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 plot_en=plot_en,verbose=verbose)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
-        if not np.any(ranks):
+        if np.all(ranks== np.nan):
             print('M rank Empty')
             rlen = 0
         else:
@@ -268,6 +267,7 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
     if corr==True and share_th==True:
         mean_th = covCI_wnoise(T,confidence=confidence,maxlag=maxlag)
         mean_th*=mean_th_factor
+        mean_th_factor=1
     else:
         mean_th = None
     for cpatch, data_in in enumerate(patches):
@@ -281,8 +281,7 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
                     noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                     corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
                     greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.,
-                    U_update=U_update,plot_en=plot_en,
-                    min_rank=min_rank)
+                    U_update=U_update,plot_en=plot_en,min_rank=min_rank, verbose=verbose)
             Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
             #print('Rank is %d'%len(keep1))
         except:
@@ -425,7 +424,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
         #################### Iterations
-        num_min_iter = 5
+        num_min_iter = 5 #update from cte
         print('Iterate until F(U,V) stops decreasing significantly') if verbose else 0
         print('For now fixed iterations as %d'%num_min_iter) if verbose else 0
         F_UVs = []
@@ -455,6 +454,10 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             F_uv = F_uv1 + F_uv2 + F_uv3
             F_UVs.append(F_uv)
             print('\tIter %d errors (%d+%d+%d)=%d'%(k,F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
+
+            if k >=1 and np.abs(F_uv - F_UVs[k-1]) <= 1: # update from cte
+                print('Stopped at iteration %d since there are no significant updates!'%k) if verbose else 0
+                break
 
             #plot_comp(Y,U_hat.dot(V_TF),'Y-Yd-RPixel variance', dims) if (plot_en and(not dims ==None)) else 0
 
@@ -604,9 +607,14 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
 
     # If no components to store, return block as it is
     if np.all(keep1 == np.nan):
-        Yd = np.zeros(data.T.shape)
-        Yd += mu.T
-        return Yd, ctid
+        if min_rank == 0:
+            Yd = np.zeros(data.T.shape)
+            Yd += mu.T
+            return Yd, ctid
+        else:
+            keep1 = np.arange(min_rank)
+            greedy = False
+            ctid[0,keep1]=1
 
     Vt = Vt[keep1,:]
 
@@ -953,7 +961,7 @@ def c_l1tf_v_hat(v,diff,sigma):
     v_hat = cp.Variable(T)
     objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
     constraints = [cp.norm(v-v_hat,2)<=sigma*np.sqrt(T)]
-    cp.Problem(objective, constraints).solve(solver='CVXOPT')#verbose=False)
+    cp.Problem(objective, constraints).solve()#solver='CVXOPT')#verbose=False)
     return v_hat.value, constraints[0].dual_value
 
 def c_l1_u_hat(y,V_TF,fudge_factor,regression=True):
@@ -990,7 +998,7 @@ def c_update_V(v,diff,lambda_):
         objective = cp.Minimize(
             cp.norm(v-v_hat,2)**2
             + lambda_*cp.norm(cp.matmul(diff,v_hat),1))
-    cp.Problem(objective).solve(solver='CVXOPT')
+    cp.Problem(objective).solve()#solver='CVXOPT')
     return v_hat.value
 
 
@@ -1083,8 +1091,9 @@ def compute_ak(dims_rs,W_rs,list_order='C'):
 
 def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
         iterate=False, confidence=0.95,corr=True,kurto=False,
-        tfilt=False,tfide=False, share_th=True,greedy=False,
-        fudge_factor=1., mean_th_factor=1.,U_update=True):
+        tfilt=False,tfide=False, share_th=True,greedy=True,
+        fudge_factor=1., mean_th_factor=1.,U_update=True,
+        min_rank=1):
     """
     WORK IN PROGRESS --- vanilla implementation
     Calculate four denoisers st each denoiser is in a new grid,
@@ -1136,7 +1145,11 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
     dims_rcs = W[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:].shape
 
     # Get pyramid functions for each grid
-    ak0,ak1,ak2,ak3 = [np.zeros(W.shape)]*4
+    #ak0,ak1,ak2,ak3 = [np.zeros(W.shape)]*4
+    ak0 = np.zeros(W.shape)
+    ak1 = np.zeros(W.shape)
+    ak2 = np.zeros(W.shape)
+    ak3 = np.zeros(W.shape)
     ak0 = compute_ak(W.shape,patches,list_order='C')
     ak1[:,row_cut[0]:row_cut[-1],:] = compute_ak(dims_rs,W_rs,list_order='F')
     ak2[col_cut[0]:col_cut[-1],:,:] = compute_ak(dims_cs,W_cs,list_order='F')
