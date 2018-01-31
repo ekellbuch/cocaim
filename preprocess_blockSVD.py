@@ -5,6 +5,7 @@ from scipy.stats import norm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from sklearn.utils.extmath import randomized_svd
+from sklearn.decomposition.dict_learning import dict_learning
 import matplotlib.pyplot as plt
 
 import trefide as tfd
@@ -33,15 +34,16 @@ def get_noise_fft(Y, noise_range = [0.25,0.5],
     Estimate the noise level for each pixel by averaging
     the power spectral density.
 
-    Inputs:
-    -------
+    Parameters:
+    ----------
 
     Y: np.ndarray
 
     Input movie data with time in the last axis
 
     noise_range: np.ndarray [2 x 1] between 0 and 0.5
-        Range of frequencies compared to Nyquist rate over which the power spectrum is averaged
+        Range of frequencies compared to Nyquist rate over
+        which the power spectrum is averaged
         default: [0.25,0.5]
 
     noise method: string
@@ -49,10 +51,11 @@ def get_noise_fft(Y, noise_range = [0.25,0.5],
         Choices:
             'mean': Mean
             'median': Median
-            'logmexp': Exponential of the mean of the logarithm of PSD (default)
+            'logmexp': Exponential of the mean of the log of PSD
 
-    Output:
-    ------
+    Outputs:
+    -------
+
     sn: np.ndarray
         Noise level for each pixel
     """
@@ -94,17 +97,17 @@ def mean_psd(y, method = 'logmexp'):
     Parameters:
     ----------
 
-        y: np.ndarray
-             PSD values
+    y:  np.ndarray
+        PSD values
 
-        method: string
-            method of averaging the noise.
-            Choices:
-             'mean': Mean
-             'median': Median
-             'logmexp': Exponential of the mean of the logarithm of PSD (default)
+    method: string
+        method of averaging the noise.
+        Choices:
+         'mean': Mean
+         'median': Median
+         'logmexp': Exponential of the mean of the logarithm of PSD (default)
 
-    Returns:
+    Outputs:
     -------
         mp: array
             mean psd
@@ -125,9 +128,9 @@ def mean_psd(y, method = 'logmexp'):
 def nextpow2(value):
     """
     Extracted from
-    from caiman.source_extraction.cnmf.deconvolution import axcov
+    caiman.source_extraction.cnmf.deconvolution import axcov
 
-    Find exponent such that 2^exponent is equal to or greater than abs(value).
+    Find exponent such that 2^exponent is >= abs(value).
 
     Parameters:
     ----------
@@ -158,7 +161,7 @@ def axcov(data, maxlag=10):
     maxlag : int
         Number of lags to use in autocovariance calculation
 
-    Returns:
+    Output:
     -------
     axcov : array
         Autocovariances computed from -maxlag:0:maxlag
@@ -174,20 +177,77 @@ def axcov(data, maxlag=10):
     return np.real(np.divide(xcov, T))
 
 
-def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
+def svd_patch(M, k=1, maxlag=10, tsub=1, ds=1,noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=False,fudge_factor=1.,mean_th=None,
-        mean_th_factor=1.,U_update=True,min_rank=0,verbose=False):
+        mean_th_factor=1.,U_update=True,min_rank=0,verbose=False,pca_method='vanilla'):
     """
-    Apply svd to k patches of M
-    tsub: temporal decimation
-    noise_norm: Noise normalization
-    iterate: find xcovs iteratively
-    confidence: CI level
-    corr: correlation flag
-    kurto: kurto: kurto flag
-    tfilt: temporal filter
-    greedy: include greedy updates of Vt and U
+    Given video M, partition video in k blocks and denoise/compress it as determined
+    by the parameters.
+
+    Parameters:
+    ----------
+
+    M:          np.array (d1xd2xT)
+                array to be denoised
+    k:          int
+                number of tiles in which to partition M along first 2 dimensions.
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+    tsub:       int
+                temporal downsample constant
+    ds:         int
+                spatial downsample constant
+    noise_norm: placeholder
+    iterate:    boolean
+                flag to include correlated components iteratively
+    confidence: float
+                confidence interval (CI) for correlation null hypothesis
+    corr:       boolean
+                flag to include components which pass correlation null hypothesis
+    kurto:      boolean
+                flag to include components which pass kurtosis null hypothesis
+    tfilt:      boolean
+                flag to temporally filter traces with AR estimate of order p.
+    tfide:      boolean
+                flag to denoise temporal traces with Trend Filtering
+    min_rank:   int
+                minimum rank of denoised/compressed matrix
+                typically set to 1 to avoid empty output (array of zeros)
+                if input array is mostly noise.
+    greedy:     boolean
+                flag to greedily update spatial and temporal components (estimated with PCA)
+                greedyly by denoising temporal and spatial components
+    mean_th_factor: float
+                factor to scale mean_th
+                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+    share_th:   boolean
+                flag to compute a unique thredhold for correlation null hypothesis
+                to be used in each tile.
+                If false: each tile calculates its own mean_th value.
+    fudge_factor: float
+                constant to scale estimated noise std st denoising st denoising is less
+                (lower factor) or more (higher factor) restrictive.
+    U_update:   boolean
+                flag to (not) update spatial components by imposing L1- constraint.
+                True for "round" neurons in 2p.
+                False for dendritic data.
+    plot_en:    boolean
+                flag to enable plots
+    verbose:    boolean
+                flag to enable verbose
+    pca_method: string
+                method for matrix decomposition (e.g. PCA, sPCA, rPCA, etc).
+                see compute_svd for options
+
+    Outputs:
+    -------
+
+    Yd:         np.array (d1 x d2 x T)
+                compressed/denoised array given input M
+    rlen:       int
+                sum of the ranks of all tiles
     """
     dimsM = M.shape
     if k > 1:
@@ -198,7 +258,7 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 corr=corr, kurto=kurto, tfilt=tfilt, tfide=tfide, share_th=share_th,
                 greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=mean_th_factor,
                 U_update=U_update,plot_en=plot_en,
-                min_rank=min_rank,verbose=verbose)
+                min_rank=min_rank,verbose=verbose,pca_method=pca_method)
         Yd = combine_blocks(dimsM, Yds, dimsMc)
         ranks = np.logical_not(np.isnan(vtids[:,:2,:])).any(axis=1).sum(axis=1).astype('int')
         # Plot ranks Box
@@ -214,22 +274,35 @@ def svd_patch(M, k=1, maxlag=10, tsub=1, noise_norm=False, iterate=False,
                 confidence=confidence, corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,
                 mean_th=mean_th, greedy=greedy,fudge_factor=fudge_factor,
                 mean_th_factor=mean_th_factor, U_update=U_update,min_rank=min_rank,
-                plot_en=plot_en,verbose=verbose,dims=dimsM)
+                plot_en=plot_en,verbose=verbose,dims=dimsM,pca_method=pca_method)
         Yd = Yd.reshape(dimsM, order='F')
         ranks = np.where(np.logical_or(vtids[0, :] == 1, vtids[1, :] == 1))[0]
-        if not np.any(ranks):
+        if np.all(ranks == np.nan):
             print('M rank Empty')
             rlen = 0
         else:
-            print('M rank {}'.format(len(ranks))) 
+            print('M rank {}'.format(len(ranks)))
             rlen = len(ranks)
     return Yd, rlen
 
 
 def split_image_into_blocks(image, number_of_blocks=16):
     """
-    Image d1 x d2 (x T)
-    is split into number_of_blocks
+    Split an image into number_of_blocks of ~similar dimensions
+
+    Parameters:
+    ----------
+    image:          np.array (d1 x d2 x T)
+                    array to be split into number_of_blocks along first
+                    two dimensions
+    number_of_blocks: int
+                    number of tiles in which to split image
+
+    Outputs
+    -------
+    blocks:         list
+                    contains tiles (d1' x d2' x T) extracted from image
+
     """
     blocks = None
     if number_of_blocks != (image.shape[0] * image.shape[1]):
@@ -244,15 +317,80 @@ def split_image_into_blocks(image, number_of_blocks=16):
     return blocks
 
 
-def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
+def compress_patches(patches,maxlag=10,tsub=1,ds=1,noise_norm=False,
         iterate=False, confidence=0.90,corr=True,kurto=False,tfilt=False,
         tfide=False, share_th=True,greedy=False,fudge_factor=1.,
         mean_th_factor=1.,U_update=True,plot_en=False,
-        min_rank=0,verbose=False):
+        min_rank=0,verbose=False,pca_method='vanilla'):
     """
-    Compress each patch
+    Denoise/compress each patch in patches list
     patches is a list of d1xd2xT arrays
-    assume a patch is a list of patches
+
+    Parameters:
+    ----------
+
+    patches:    list
+                list of arrays to be denoised
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+    tsub:       int
+                temporal downsample constant
+    ds:         int
+                spatial downsample constant
+    noise_norm: placeholder
+    iterate:    boolean
+                flag to include correlated components iteratively
+    confidence: float
+                confidence interval (CI) for correlation null hypothesis
+    corr:       boolean
+                flag to include components which pass correlation null hypothesis
+    kurto:      boolean
+                flag to include components which pass kurtosis null hypothesis
+    tfilt:      boolean
+                flag to temporally filter traces with AR estimate of order p.
+    tfide:      boolean
+                flag to denoise temporal traces with Trend Filtering
+    min_rank:   int
+                minimum rank of denoised/compressed matrix
+                typically set to 1 to avoid empty output (array of zeros)
+                if input array is mostly noise.
+    greedy:     boolean
+                flag to greedily update spatial and temporal components (estimated with PCA)
+                greedyly by denoising temporal and spatial components
+    mean_th_factor: float
+                factor to scale mean_th
+                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+    share_th:   boolean
+                flag to compute a unique thredhold for correlation null hypothesis
+                to be used in each tile.
+                If false: each tile calculates its own mean_th value.
+    fudge_factor: float
+                constant to scale estimated noise std st denoising st denoising is less
+                (lower factor) or more (higher factor) restrictive.
+    U_update:   boolean
+                flag to (not) update spatial components by imposing L1- constraint.
+                True for "round" neurons in 2p.
+                False for dendritic data.
+    plot_en:    boolean
+                flag to enable plots
+    verbose:    boolean
+                flag to enable verbose
+    pca_method: string
+                method for matrix decomposition (e.g. PCA, sPCA, rPCA, etc).
+                see compute_svd for options
+
+    Outputs:
+    -------
+
+    Yds:        np.array (k x d x T)
+                compressed/denoised array (dxT)
+                padded array to avoid moving around lists
+    vtids:      np.array (k x 3 x d)
+                indicator matrix for each tile k
+                with a 3D matrix (corr-kurto-reject) which points which statistic
+                a given component passed and thus it is included.
+                If greedy=True, all additional components added are included as corr components.
     """
     # For any given patch
     k = len(patches)
@@ -281,7 +419,7 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
                     noise_norm=noise_norm, iterate=iterate,confidence=confidence,
                     corr=corr,kurto=kurto,tfilt=tfilt,tfide=tfide,mean_th=mean_th,
                     greedy=greedy,fudge_factor=fudge_factor,mean_th_factor=1.,
-                    U_update=U_update,plot_en=plot_en,min_rank=min_rank)
+                    U_update=U_update,plot_en=plot_en,min_rank=min_rank,pca_method=pca_method)
             Yds[cpatch] = pad(Yd_patch, (dxy, T), (0, 0))
             #print('Rank is %d'%len(keep1))
         except:
@@ -295,7 +433,37 @@ def compress_patches(patches,maxlag=10,tsub=1,noise_norm=False,
 def iterative_update_V(Y, U_hat,V_TF_,lambdas_=None,
         verbose=False,plot_en=False):
     """
-    Run update for each vi wrt given lambdas_
+    Update temporal components V_TF_ iteratively
+    V_i = argmin ||Y-UV||_2^2 + sum_i lambda_i ||D^2V_i||_1
+    (i.e. subtract off other components from Y, project
+    normalized U_i onto residual and denoise V with TF)
+
+    Parameters:
+    ----------
+    Y:              np.array (d x T)
+                    2D video array (pixels x Time)
+    U_hat:          np.array (d x k)
+                    spatial components of Y
+                    k is the estimated rank of Y
+    V_TF_:          np.array (k x T)
+                    temporal components of Y
+                    k is the estimated rank of Y
+    lambdas_:       np.array (k x 1)
+                    lagrange multipliers to enforce ||D^2V_i||_1
+                    where i corresponds to a single pixel
+                    and D^2 is the second difference operator
+                    if None: lambdas_s in initialized by recalculating
+                    the noise if the temporal component
+    verbose:        boolean
+                    flag to enable verbose
+    plot_en:        string
+                    flag to enable plots
+
+    Outputs:
+    -------
+    V_TF_2:         np.array (d x T)
+                    updated V_TF_
+
     """
     U_hat_ = U_hat.copy()
     num_components, T = V_TF_.shape
@@ -340,28 +508,67 @@ def iterative_update_V(Y, U_hat,V_TF_,lambdas_=None,
 
 def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         maxlag=10, confidence=0.95, corr=True, mean_th=None,
-        kurto=False, verbose=False,plot_en=False,U_update=True):
+        kurto=False, verbose=False,plot_en=False,U_update=True,
+        pca_method='vanilla',final_update=True):
     """
-    Greedy approach for denoising
-    Inputs
-    ------
-    Y:              video dxT
-    U:              spatial components (d x rank)
-    V_hat:          temporal components (rank x T)
-    fudge_factor:   fudge factor to scale noise_std \sigma by
-    maxlag:         autocorrelation ftcn lag
-    confidence:     confidence interval for null hypothesis
-    corr
-    kurto
-    mean_th
-    U_update: enforce L1 constraint on the spatial components
-    verbose
-    plot_en
+    Denoise spatial and temporal components greedily
+    F(U,V) = ||Y-UV||^2_2 + sum_i lambda_i ||D^2V_i||_1 + sum_j nu_j ||U_j||_1
+    applying a soft constraint that the L2 norms of U and V are both 1
+    i,j index components and pixels respectively
+    lambda_i and nu_j are the lagrange multipliers
 
-    Outputs
+    Parameters:
+    ----------
+
+    Y:          np.array (d x T)
+                2D video array (pixels x Time)
+    U_hat:      np.array (d x k)
+                spatial components of Y
+                k is the estimated rank of Y
+    V_hat:      np.array (k x T)
+                temporal components of Y
+                k is the estimated rank of Y
+    dims:       tuple (d1 x d2 x T)
+                dimensions of video array used for plotting
+    fudge_factor: float
+                constant to scale estimated noise std st denoising st denoising is less
+                (lower factor) or more (higher factor) restrictive.
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+                employed to look for additional components in residual
+    confidence: float
+                confidence interval (CI) for correlation null hypothesis
+                employed to look for additional components in residual
+    corr:       boolean
+                flag to include components which pass correlation null hypothesis
+    kurto:      boolean
+                flag to include components which pass kurtosis null hypothesis
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    U_update:   boolean
+                flag to (not) update spatial components by imposing L1-constraint.
+                True for "round" neurons in 2p.
+                False for dendritic data.
+    plot_en:    boolean
+                flag to enable plots
+    verbose:    boolean
+                flag to enable verbose
+    pca_method: string
+                method for matrix decomposition (e.g. PCA, sPCA, rPCA, etc).
+                see compute_svd for options
+
+    Outputs:
     -------
-    U_hat
-    V_hat
+
+    U_hat:      np.array (d x k1)
+                spatial components of Y
+                k1 is the updated estimated rank of Y
+                k1 >= k depending on additional structured components added from residual.
+    V_TF:       np.array (k1 x T)
+                temporal components of Y
+                k1 is the updated estimated rank of Y
+                k1 >= k depending on additional structured components added from residual.
     """
     # D^2 = discrete 2nd order difference operator
     T = V_hat.shape[1]
@@ -469,7 +676,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         print('*Running Part (2) of iter %d with %d components'%(iteration, V_TF.shape[0])) if verbose else 0
 
         ### (2) Compute PCA on residual R  and check for correlated components
-        U_r, s_r, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method='vanilla')
+        U_r, s_r, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'), method=pca_method)
         # For greedy approach, only keep big highly correlated components
         ctid = choose_rank(Vt_r, maxlag=maxlag, confidence=confidence,
                        corr=corr, kurto=kurto, mean_th=mean_th)
@@ -488,7 +695,8 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     ### Final update
     print('Running final update') if verbose else 0
     #################
-    V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
+    if final_update:
+        V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
     if U_update:
         print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
         outs_ = [c_l1_u_hat(y,V_TF,1) for y in Y]
@@ -512,30 +720,74 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
         kurto=False, tfilt=False, tfide=False, mean_th=None,
         greedy=False, mean_th_factor=1.,p=1.,fudge_factor=1.,
         plot_en=False,verbose=False,U_update=False,
-        min_rank=0):
+        min_rank=0, pca_method='vanilla'):
     """
-    Compress a single block
-    Inputs
-    ------
-    data_all:    video (d x T) or (d1 xd2 x T)
-    maxlag:     max_corr lag
-    tsub:       temporal downsample
-    ds:         spatial downsample
+    Compress array data_all as determined by parameters.
+
+    Parameters:
+    ----------
+
+    data_all:   np.array (d x T) or (d1 x d2 xT)
+                2D or 3D video array (pixels x Time) or (pixel x pixel x Time)
+    dims:       tuple (d1 x d2 x T)
+                dimensions of video array used for plotting
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+    tsub:       int
+                temporal downsample constant
+    ds:         int
+                spatial downsample constant
     noise_norm: placeholder
-    iterate:    Find corr components iteratively
-    confidence: CI for corr null hypothesis
-    corr:       Identify components via corr
-    kurto:      Identify components via kurtosis
-    tfilt:      Temporally filter traces with AR estimate of order p.
-    p:          order of AR fc, used if tfilt is True
-    tfide:      Denoise temporal traces with TF
-    mean_th:    threshold employed to reject components wrt corr
-    greedy:     Calculate spatial and temporal estimated with a greedy approach
-    mean_th_factor: factor to scale mean_th with if goal is to keep certain components
-    Outputs
+    iterate:    boolean
+                flag to include correlated components iteratively
+    confidence: float
+                confidence interval (CI) for correlation null hypothesis
+    corr:       boolean
+                flag to include components which pass correlation null hypothesis
+    kurto:      boolean
+                flag to include components which pass kurtosis null hypothesis
+    tfilt:      boolean
+                flag to temporally filter traces with AR estimate of order p.
+    p:          int
+                order of AR estimate, used only if tfilt is True
+    tfide:      boolean
+                flag to denoise temporal traces with Trend Filtering
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    min_rank:   int
+                minimum rank of denoised/compressed matrix
+                typically set to 1 to avoid empty output (array of zeros)
+                if input array is mostly noise.
+    greedy:     boolean
+                flag to greedily update spatial and temporal components (estimated with PCA)
+                greedyly by denoising temporal and spatial components
+    mean_th_factor: float
+                factor to scale mean_th
+                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+    fudge_factor: float
+                constant to scale estimated noise std st denoising st denoising is less
+                (lower factor) or more (higher factor) restrictive.
+    U_update:   boolean
+                flag to (not) update spatial components by imposing L1- constraint.
+                True for "round" neurons in 2p.
+                False for dendritic data.
+    plot_en:    boolean
+                flag to enable plots
+    verbose:    boolean
+                flag to enable verbose
+    pca_method: string
+                method for matrix decomposition (e.g. PCA, sPCA, rPCA, etc).
+                see compute_svd for options
+    Outputs:
     -------
-    Yd_out:     Denoised video (dxT)
-    ctids:      component matrix (corr-kurto-reject)
+
+    Yd_out:     np.array (d x T)
+                compressed/denoised array (dxT)
+    ctids:      np.array (3,d)
+                indicator 3D matrix (corr-kurto-reject) which points which statistic
+                a given component passed and thus it is included.
+                If greedy=True, all components added are included as corr components.
     """
     if data_all.ndim ==3:
         dims = data_all.shape
@@ -582,7 +834,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
         #data0 = spatial_decimation(data0, ds, dims)
         data0 = data0.copy()
     # Run svd
-    U, s, Vt = compute_svd(data0.T, method='vanilla')
+    U, s, Vt = compute_svd(data0.T, method=pca_method)
 
     # Project back if temporally filtered or downsampled
     if tfilt or tsub > 1:
@@ -631,7 +883,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
                     fudge_factor=fudge_factor, maxlag=maxlag,
                     confidence=confidence, corr=corr,
                     kurto=kurto, mean_th=mean_th,U_update=U_update,
-                    plot_en=plot_en,verbose=verbose)
+                    plot_en=plot_en,verbose=verbose,pca_method=pca_method)
             ctid[0,np.arange(Vt.shape[0])]=1
         except:
             print('ERROR: Greedy solving failed, using default parameters')
@@ -651,6 +903,27 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
 
 
 def plot_vt_cov(Vt1,keep1, maxlag):
+    """
+    Plot figures of ACF of vectors in Vt1 until maxlag
+    (right pannel) keep1 and (left pannel) other components
+
+    Parameters:
+    ----------
+
+    Vt1:    np.array (k xT)
+            array of k temporal components lasting T samples
+    keep1: np.array (k1 x 1)
+            array of temporal components which passed a given hypothesis
+    maxlag: int
+            determined lag until which to plot ACF function of row-vectors
+            in Vt1
+
+    Outputs:
+    -------
+
+    None:   displays a figure
+
+    """
     fig, axarr = plt.subplots(1,2,sharey=True)
     loose = np.setdiff1d(np.arange(Vt1.shape[0]),keep1)
     for keep in keep1:
@@ -679,8 +952,33 @@ def plot_vt_cov(Vt1,keep1, maxlag):
 
 def compute_svd(M, method='randomized', n_components=400):
     """
-    Compute svd on centered M
-    M d x T
+    Decompose array M given parameters.
+    asumme M has been mean_subtracted
+
+    Parameters:
+    ----------
+
+    M:          np.array (d xT)
+                input array to decompose
+    method:     string
+                method to decompose M
+                ['vanilla','randomized']
+    n_components: int
+                number of components to extract from M
+                if method='randomized'
+
+    Outputs:
+    -------
+
+    U:          np.array (d x k)
+                left singular vectors of M
+                k = n_components if method='randomized'
+    Vt:         np.array (k x T)
+                right singular vectors of M
+                k = n_components if method='randomized'
+    s:          np.array (k x 1)
+                variance of components
+                k = n_components if method='randomized'
     """
 
     if method == 'vanilla':
@@ -694,7 +992,42 @@ def compute_svd(M, method='randomized', n_components=400):
 def choose_rank(Vt,maxlag=10,iterate=False,confidence=0.90,
         corr=True,kurto=False,mean_th=None,mean_th_factor=1.,min_rank=0):
     """
-    Select rank wrt axcov and kurtosis
+    Select rank (components to keep) from Vt wrt enabled test statistic
+    (e.g. axcov and/or kurtosis)
+
+    Parameters:
+    ----------
+    Vt:         np.array (k x T)
+                array of k temporal components lasting T samples
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+    iterate:    boolean
+                flag to include correlated components iteratively
+    confidence: float
+                confidence interval (CI) for correlation null hypothesis
+    corr:       boolean
+                flag to include components which pass correlation null hypothesis
+    kurto:      boolean
+                flag to include components which pass kurtosis null hypothesis
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    mean_th_factor: float
+                factor to scale mean_th
+                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+    min_rank:   int
+                minimum number of components to include in output
+                even if no components of Vt pass any test
+
+
+    Outputs:
+    -------
+
+    vtid:       np.array (3,d)
+                indicator 3D matrix (corr-kurto-reject) which points which statistic
+                a given component passed and thus it is included.
+                can vary according to min_rank
+
     """
     n, L = Vt.shape
     vtid = np.zeros(shape=(3, n)) * np.nan
@@ -726,11 +1059,20 @@ def mean_confidence_interval(data, confidence=0.90):
     """
     Compute mean confidence interval (CI)
     for a normally distributed population
-    Input:
-        data: input
-        confidence: confidence level
-    Output:
-        th: threshold at CI
+
+    Parameters:
+    ----------
+
+    data:       np.array (Lx1)
+                input vector from which to calculate mean CI
+                assumes gaussian-like distribution
+    confidence: float
+                confidence level for test statistic
+
+    Outputs:
+    -------
+    th:         float
+                threshold for mean value at CI
     """
     _, th = sp.stats.norm.interval(confidence,loc =np.mean(data),scale=data.std())
     return th
@@ -738,7 +1080,28 @@ def mean_confidence_interval(data, confidence=0.90):
 
 def covCI_wnoise(L, confidence=0.90, maxlag=10, n=3000):
     """
-    Compute mean_th for auto covariance of white noise
+    Generate n AWGN vectors lasting L samples.
+    Calculate the mean of the ACF of each vector for 0:maxlag
+    Return the mean threshold with specified confidence.
+
+    Parameters:
+    ----------
+
+    L:          int
+                length of vector
+    confidence: float
+                confidence level for test statistic
+    maxlag:     int
+                max correlation lag for correlation null hypothesis in samples
+                (e.g. indicator decay in samples)
+    n:          int
+                number of standard normal vectors to generate
+
+    Outputs:
+    -------
+
+    mean_th:    float
+                value of mean of ACFs of each standard normal vector at CI.
     """
     # th1 = 0
     #print 'confidence is {}'.format(confidence)
@@ -757,7 +1120,22 @@ def covCI_wnoise(L, confidence=0.90, maxlag=10, n=3000):
 
 def temporal_decimation(data, mb):
     """
-    Decimate data by mb, new frame is mean of decimated frames
+    Decimate data by mb
+    new frame is mean of decimated frames
+
+    Parameters:
+    ----------
+    data:       np.array (T x d)
+                array to be decimated wrt first axis
+
+    mb:         int
+                contant by which to decimate data
+                (i.e. number of frames to average for decimation)
+
+    Outputs:
+    -------
+    data0:      np.array (T//mb x d)
+                temporally decimated array given data
     """
     data0 = data[:int(len(data)/mb*mb)].reshape((-1, mb) + data.shape[1:]).mean(1).astype('float64')
     return data0
@@ -765,8 +1143,27 @@ def temporal_decimation(data, mb):
 
 def spatial_decimation(data,ds,dims):
     """
-    Decimate data by ds, smaller frame is mean of decimated frames
+    Decimate data by ds
+    smaller frame is mean of decimated frames
+
+    Parameters:
+    ----------
+    data:       np.array (T x d)
+                array to be decimated wrt second axis
+
+    ds:         int
+                contant by which to decimate data
+                (i.e. number of pixels to average for decimation)
+
+    dims:       np.array or tupe (d1,d2,T)
+                dimensions of data
+
+    Outputs:
+    -------
+    data0:      np.array (T x d//ds)
+                spatially decimated array given data
     """
+
     #data0 = data.reshape(len(data0), dims[1] / ds[0], ds[0], dims[2] / ds[1], ds[1]).mean(2).mean(3)
     data0  = data.copy()
     return data0
@@ -775,8 +1172,34 @@ def spatial_decimation(data,ds,dims):
 def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=False,
         extra=1,min_rank=0,verbose=False):
     """
-    Compute only auto covariance,
-    calculate iteratively: until mean reaches mean_th
+    Calculate auto covariance of row vectors in Vt
+    and output indices of vectors which pass correlation null hypothesis.
+
+    Parameters:
+    ----------
+    Vt:         np.array(k x T)
+                row array of compoenents on which to test correlation null hypothesis
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    maxlag:     int
+                determined lag until which to average ACF of row-vectors for null hypothesis
+    iterate:    boolean
+                flag to include components which pass null hypothesis iteratively
+                (i.e. if the next row fails, no additional components are added)
+    extra:      int
+                number of components to add as extra to components which pass null hypothesis
+                components are added in ascending order corresponding to order in mean_th
+    min_rank:   int
+                minimum number of components that should be included
+                add additional components given components that (not) passed null hypothesis
+    verbose:    boolean
+                flag to enable verbose
+
+    Outputs:
+    -------
+    keep:       list
+                includes indices of components which passed the null hypothesis
+                and/or additional components added given parameters
     """
     keep = []
     num_components = Vt.shape[0]
@@ -792,37 +1215,41 @@ def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=False,
                 break
         else:
             keep.append(vector)
-    #print(keep)
-    #if not keep:
-    #    print('from cov Empty')
-    #else:
-        # verbose
-        #print('from cov {}'.format(len(keep)))
     # Store extra components
     if vector < num_components and extra != 1:
         extra = min(vector*extra,Vt.shape[0])
         for addv in range(1, extra-vector+ 1):
             keep.append(vector + addv)
     # Forcing one components
-    # delete
-    #if not np.any(keep) and min_rank >0:
     if not keep and min_rank>0:
         # vector is empty for once min
         keep.append(0)
         print('Forcing one component')
-    #if not keep:
-    #    print('from cov still empty')
-    #    print(keep)
     return keep
 
 
 def pad(array, reference_shape, offsets, array_type=np.nan):
     """
-    array: Array to be padded
-    reference_shape: tuple of size of narray to create
-    offsets: list of offsets (number of elements must be equal to the dimension
-    of the array) will throw a ValueError if offsets is too big and the
-    reference_shape cannot handle the offsets
+    Pad array wrt reference_shape exlcluding offsets with dtype=array_type
+
+    Parameters:
+    ----------
+    array:          np.array
+                    array to be padded
+    reference_shape:tuple
+                    size of narray to create
+    offsets:        tuple
+                    list of offsets (number of elements must be equal
+                    to the dimension of the array)
+                    will throw a ValueError if offsets is too big and the
+                    reference_shape cannot handle the offsets
+    array_type:     dtype
+                    data type to pad array with.
+
+    Outputs:
+    -------
+    result:         np.array (reference_shape)
+                    padded array given input
     """
 
     # Create an array of zeros with the reference shape
@@ -839,7 +1266,17 @@ def unpad(x):
     """
     Given padded matrix with nan
     Get rid of all nan in order (row, col)
-    does not retain dimension
+
+    Parameters:
+    ----------
+    x:          np.array
+                array to unpad (all nan values)
+
+    Outputs:
+    -------
+    x:          np.array
+                unpaded array (will not contain nan values)
+                dimension might be different from input array
     """
     x = x[:, ~np.isnan(x).all(0)]
     x = x[~np.isnan(x).all(1)]
@@ -849,10 +1286,27 @@ def unpad(x):
 def combine_blocks(dimsM, Mc, dimsMc=None,
         list_order='C', array_order='F'):
     """
-    Reshape blocks given by compress_blocks
-    list order 'F' or 'C' : if Mc as list, assumes order is in such format
-    array order if dxT instead of d1xd2xT assumes always array_order='F'
-    NOTE: if dimsMC is NONE then MC must be a d1 x d2 x T matrix
+    Combine blocks given by compress_blocks
+
+    Parameters:
+    ----------
+    dimsM:          tuple (d1,d2,T)
+                    dimensions of original array
+    Mc:             np.array or list
+                    contains (padded) tiles from array.
+    dimsMc:         np.array of tuples (d1,d2,T)
+                    (original) dimensions of each tile in array
+    list_order:     string {'F','C'}
+                    determine order to reshape tiles in array
+                    array order if dxT instead of d1xd2xT assumes always array_order='F'
+                    NOTE: if dimsMC is NONE then MC must be a d1 x d2 x T array
+    array_order:    string{'F','C'}
+                    array order to concatenate tiles
+                    if Mc is (dxT), the outputs is converted to (d1xd2xT)
+    Outputs:
+    --------
+    M_all:          np.array (dimsM)
+                    reconstruction of array from Mc
     """
 
     d1, d2, T = dimsM
@@ -908,7 +1362,19 @@ def cn_ranks(dim_block, ranks, dims):
 
 def cn_ranks_plot(dim_block, ranks, dims):
     """
-        Calls function cn_ranks and plots rank matrix
+    Plot rank array given ranks of individual tiles,
+    and tile coordinates.
+
+    Parameters:
+    ----------
+    dim_block:
+    ranks:
+    dims:
+
+    Outputs:
+    -------
+    Cplot3:         np.array
+                    array of ranks per tile
     """
     Cplot3 = cn_ranks(dim_block, ranks, dims[:2])
 
@@ -948,9 +1414,13 @@ def cn_ranks_plot(dim_block, ranks, dims):
 
 def c_l1tf_v_hat(v,diff,sigma):
     """
+    Update vector v according to difference fctn diff
+    with noise_std(v) = sigma
+
     V(i) = argmin_W ||D^2 W||_1
     st ||V_i-W||_2<sigma_i*sqrt(T)
     Include optimal lagrande multiplier for constraint
+
     """
     T = len(v)
     v_hat = cp.Variable(T)
@@ -959,8 +1429,10 @@ def c_l1tf_v_hat(v,diff,sigma):
     cp.Problem(objective, constraints).solve()#solver='CVXOPT')#verbose=False)
     return v_hat.value, constraints[0].dual_value
 
-def c_l1_u_hat(y,V_TF,fudge_factor,regression=True):
+def c_l1_u_hat(y,V_TF,fudge_factor):
     """
+    update array U given Y and V_TF
+
     U(j) = argmin_W ||W||_1
     st ||Y_j-W'V_TF(j)||_2^2 < T
     if problem infeasible:
@@ -1045,8 +1517,19 @@ def plot_comp(Y,Y_hat,title_,dims,idx_=0):
 
 def pyramid_function(dims):
     """
-    Base on dims create respective pyramid function
-    pyramid function is 0 at boundary and 1 at center
+    Compute a pyramid function of dimensions dims.
+    Pyramid function is 0 at boundary and 1 at center.
+
+    Parameters:
+    ----------
+
+    dims:       tuple (d1,d2)
+                dimensions of pyramid function
+
+    Outputs:
+    -------
+    a_k:        np.array (dims)
+                pyramid function with dimensions dims
     """
     a_k = np.zeros(dims[:2])
     xc,yc = dims[0]//2,dims[1]//2
@@ -1067,7 +1550,7 @@ def pyramid_function(dims):
 def compute_ak(dims_rs,W_rs,list_order='C'):
     """
     Get ak pyramid matrix wrt center
-    dims_rs: dimension of matrix
+    dims_rs: dimension of array
     W_rs: list of pacthes in order F
 
     """
@@ -1076,7 +1559,7 @@ def compute_ak(dims_rs,W_rs,list_order='C'):
     for dim_ in dims_:
         a_k = pyramid_function(dim_)
         a_ks.append(a_k)
-    # given W_rs and a_ks reconstruct matrix
+    # given W_rs and a_ks reconstruct array
     a_k = combine_blocks(dims_rs,a_ks,dims_,list_order=list_order)
     if False:
         plt.imshow(a_k[:,:,0])
@@ -1090,16 +1573,21 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
         fudge_factor=1., mean_th_factor=1.,U_update=True,
         min_rank=1):
     """
-    WORK IN PROGRESS --- vanilla implementation
+    Vanilla implementation for debugging
     Calculate four denoisers st each denoiser is in a new grid,
     (Given original tiling grid
     each additional grid has a 1/2 offset vertically, horizontally or both.
     this to minimize the number of block artifacts
     downside: x4 redundancy.
-    vanilla implementation
 
-    Inputs
-    ------
+    Parameters:
+    ----------
+    -- see svd_patch
+    Outputs:
+    -------
+    -- matrix is combination of 4x denoisers and their respective
+    pyramid functions
+
     """
     # Given an video W d1 x d2 x T
     # split into patches
