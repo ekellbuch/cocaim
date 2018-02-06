@@ -179,8 +179,8 @@ def axcov(data, maxlag=10):
 
 def svd_patch(M, k=1, maxlag=10, tsub=1, ds=1,noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
-        share_th=True, plot_en=False,greedy=False,fudge_factor=1.,mean_th=None,
-        mean_th_factor=1.,U_update=True,min_rank=0,verbose=False,pca_method='vanilla'):
+        share_th=True, plot_en=False,greedy=True,fudge_factor=0.9,mean_th=None,
+        mean_th_factor=2.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
     """
     Given video M, partition video in k blocks and denoise/compress it as determined
     by the parameters.
@@ -578,6 +578,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     rerun_1 = 1 # flag to run part (1)
     iteration = 0 # iteration # for part(1)
 
+    # Plot V
     if plot_en:
         for idx, Vt_ in enumerate(V_hat):
             plt.title('Temporal component %d'%idx)
@@ -613,6 +614,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 plt.plot(V_hat[idx,:])
                 plt.plot(Vt_)
                 plt.show()
+
         # normalize each V to have unit L2 norm.
         #V_TF = preprocessing.normalize(V_TF, norm='l2')
         ####################
@@ -624,9 +626,10 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
         else:
             nus_= np.zeros((U_hat.shape[0],))
+            U_hat = Y.dot(np.linalg.pinv(V_TF))
         # Plot U
         if plot_en and (not dims==None):
-            tmp_u = Y.dot(V_TF.T).T#V_TF.dot(Y.T)
+            tmp_u = Y.dot(V_TF.T).T
             for ii in range(U_hat.shape[1]):
                 plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
@@ -646,6 +649,8 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
                 #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
                 U_hat = np.asarray(c_update_U_parallel(Y,V_TF,nus_))
+            else:
+                U_hat = Y.dot(np.linalg.pinv(V_TF))
             # Plot U
             if plot_en and (not dims==None):
                 tmp_u= Y.dot(V_TF.T).T#V_hat.dot(Y.T)
@@ -691,19 +696,23 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             V_hat = np.vstack((V_TF, Vt_r[keep1_r,:]))
             U_hat = np.hstack((U_hat,U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
             iteration +=1
+
     ##################
     ### Final update
-    print('Running final update') if verbose else 0
+    print('Running final update') if verbose and final_update else 0
     #################
-    if final_update:
-        V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
-    if U_update:
+    # if final_update:
+    V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
+
+    if U_update and final_update:
         print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
         outs_ = [c_l1_u_hat(y,V_TF,1) for y in Y]
         U_hat, _ = map(np.asarray,zip(*np.asarray(outs_)))
     else:
         U_hat = Y.dot(np.linalg.pinv(V_TF))
 
+    if final_update:
+        V_TF = np.linalg.pinv(U_hat).dot(Y)
     #plot_comp(Y,U_hat.dot(V_TF),'Frame 0', dims, idx_=0) if (plot_en and(not dims ==None)) else 0
     # Plot U
     if plot_en and (not dims==None):
@@ -1351,7 +1360,7 @@ def cn_ranks(dim_block, ranks, dims):
     d1,d2  = Crank.shape
     i,j = 0,0
     for ii in range(0,len(ranks)):
-        d1c , d2c , _= dim_block[ii]
+        d1c , d2c  = dim_block[ii][:2]
         Crank[i:i+d1c,j:j+d2c].fill(int(ranks[ii]))
         j+= d2c
         if j == d2:
@@ -1377,34 +1386,35 @@ def cn_ranks_plot(dim_block, ranks, dims):
                     array of ranks per tile
     """
     Cplot3 = cn_ranks(dim_block, ranks, dims[:2])
-
     d1, d2 = dims[:2]//np.min(dims[:2])
     fig, ax3 = plt.subplots(1,1,figsize=(d1*5,d2*5))
-    ax3.set_title('Ranks in each tile')
-    im3 = ax3.imshow(Cplot3, vmin=max(0,Cplot3.min()-5),
-                     vmax=Cplot3.max()+10, cmap='Reds',
+    ax3.set_title('Ranks in each tile %d'%(
+        np.sum(np.asarray(ranks))))
+    im3 = ax3.imshow(Cplot3, vmin=max(0,Cplot3.min()-np.std(ranks)),
+                     vmax=Cplot3.max()+np.std(ranks), cmap='Reds',
                      interpolation='nearest', aspect='equal')
 
     divider3 = make_axes_locatable(ax3)
     cax3 = divider3.append_axes("right", size="2%", pad=0.05)
-    plt.colorbar(im3, cax=cax3)
-
+    plt.colorbar(im3, cax=cax3,format='%d',
+            ticks=np.linspace(Cplot3.min(),Cplot3.max(),5))
 
     dim_block = np.asarray(dim_block)
     cols, rows = dim_block.T[0] , dim_block.T[1]
-
     K = int(np.sqrt(len(dim_block)))
     row_array = np.insert(rows[::K+1], 0, 0).cumsum()
     col_array = np.insert(cols[::K+1], 0, 0).cumsum()
-    x, y = np.meshgrid(row_array[:-1], col_array[:-1])
 
+    row_extra, col_extra = np.divide(dims[:2],[row_array[-1],col_array[-1]])==1
+    row_array = np.append(col_array,dims[0]) if not col_extra else row_array
+    col_array = np.append(col_array,dims[1]) if not row_extra else col_array
+    x, y = np.meshgrid(row_array[:-1], col_array[:-1])
     ax3.set_yticks(col_array[:-1])
     ax3.set_xticks(row_array[:-1])
 
     for ii , (row_val, col_val) in enumerate(zip(x.flatten(), y.flatten())):
         c = str(int(Cplot3[int(col_val), int(row_val)]))
         ax3.text(row_val + rows[ii]/2, col_val+cols[ii]/2, c, va='center', ha='center')
-
     plt.tight_layout()
     plt.show()
     return Cplot3
@@ -1515,7 +1525,8 @@ def plot_comp(Y,Y_hat,title_,dims,idx_=0):
 ###################
 
 
-def pyramid_function(dims):
+def pyramid_function(dims,plot_en=False):
+    from math import floor,ceil
     """
     Compute a pyramid function of dimensions dims.
     Pyramid function is 0 at boundary and 1 at center.
@@ -1532,22 +1543,33 @@ def pyramid_function(dims):
                 pyramid function with dimensions dims
     """
     a_k = np.zeros(dims[:2])
-    xc,yc = dims[0]//2,dims[1]//2
+    xc, yc = ceil(dims[0]/2),ceil(dims[1]/2)
 
-    for ii in range(dims[0]):
-        for jj in range(dims[1]):
-            a_k[ii,jj] = max(np.abs(xc-ii),np.abs(yc-jj))
-    a_k = 1-a_k/a_k.max()
+    for ii in range(xc):
+        for jj in range(yc):
+            a_k[ii,jj]=max(dims)-min(ii,jj)
+            a_k[-ii-1,-jj-1]=a_k[ii,jj]
 
-    if False:
+    for ii in range(xc,dims[0]):
+        for jj in range(yc):
+            a_k[ii,jj]=a_k[ii,-jj-1]
+    for ii in range(xc):
+        for jj in range(yc,dims[1]):
+            a_k[ii,jj]=a_k[-ii-1,jj]
+    a_k = a_k.max() - a_k
+    a_k /=a_k.max()
+
+    if plot_en:
         plt.figure(figsize=(10,10))
         plt.imshow(a_k)
         plt.colorbar()
-    a_k = np.array([a_k,]*dims[2]).transpose([1,2,0])
+        plt.show()
+    if len(dims)>2:
+        a_k = np.array([a_k,]*dims[2]).transpose([1,2,0])
     return a_k
 
 
-def compute_ak(dims_rs,W_rs,list_order='C'):
+def compute_ak(dims_rs,W_rs,list_order='C',plot_en=False):
     """
     Get ak pyramid matrix wrt center
     dims_rs: dimension of array
@@ -1561,7 +1583,8 @@ def compute_ak(dims_rs,W_rs,list_order='C'):
         a_ks.append(a_k)
     # given W_rs and a_ks reconstruct array
     a_k = combine_blocks(dims_rs,a_ks,dims_,list_order=list_order)
-    if False:
+    if plot_en:
+        plt.figure(figsize=(10,10))
         plt.imshow(a_k[:,:,0])
         plt.colorbar()
     return a_k
@@ -1718,6 +1741,58 @@ def denoisers_off_grid(W,k,maxlag=10,tsub=1,noise_norm=False,
 
     W_hat = (ak0*W0+ak1*W1+ak2*W2+ak3*W3)/(ak0+ak1+ak2+ak3)
 
+    return W_hat
+
+##########3
+def combine_4xd(dims,row_cut,col_cut,patches,dW_rs,dW_cs,dW_rcs):
+    #dims_rs, dims_cs, dims_rcs = [dims]*3
+    #print(dims_rs)
+    #print(row_cut[-1]-row_cut[0])
+    #dims_rs[1]=row_cut[-1]-row_cut[0]
+    dims_rs=[dims[0],row_cut[-1]-row_cut[0],dims[2]]
+    dims_cs=[col_cut[-1]-col_cut[0],dims[1],dims[2]]
+    dims_rcs= [col_cut[-1]-col_cut[0],row_cut[-1]-row_cut[0], dims[2]]
+    #dims_rs = ()W[:,row_cut[0]:row_cut[-1],:].shape
+    #dims_cs = W[col_cut[0]:col_cut[-1],:,:].shape
+    #dims_rcs = W[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:].shape
+
+    # Get pyramid functions for each grid
+    #ak0,ak1,ak2,ak3 = [np.zeros(dims)]*4
+    ak0 = np.zeros(dims)
+    ak1 = np.zeros(dims)
+    ak2 = np.zeros(dims)
+    ak3 = np.zeros(dims)
+    ak0 = compute_ak(dims,patches,list_order='C')
+    ak1[:,row_cut[0]:row_cut[-1],:] = compute_ak(dims_rs,dW_rs,list_order='F')
+    ak2[col_cut[0]:col_cut[-1],:,:] = compute_ak(dims_cs,dW_cs,list_order='F')
+    ak3[col_cut[0]:col_cut[-1], row_cut[0]:row_cut[-1],:] = compute_ak(dims_rcs,dW_rcs,list_order='F')
+
+    # Force outer most border = 1
+    #ak0[[0,-1],[0,-1],:]=1
+    ak0[0,:,:]=1
+    ak0[-1,:,:]=1
+    ak0[:,0,:]=1
+    ak0[:,-1,:]=1
+    # if output a bunch of lists this will take forever
+    #return ak0,ak1,ak2,ak3,patches,W_rs,W_cs,W_rcs
+
+    W1,W2,W3 = [np.zeros(dims)]*3
+    W0 = combine_blocks(dims,patches,list_order='C')
+    W1[:,row_cut[0]:row_cut[-1],:] = combine_blocks(dims_rs,dW_rs,list_order='F')
+    W2[col_cut[0]:col_cut[-1],:,:] =combine_blocks(dims_cs,dW_cs,list_order='F')
+    W3[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:] = combine_blocks(dims_rcs,dW_rcs,list_order='F')
+
+
+    if True:
+        for ak_ in [ak0,ak1,ak2,ak3]:
+            plt.imshow(ak_[:,:,0])
+            plt.show()
+
+    if True:
+        plt.figure(figsize=(10,10))
+        plt.imshow((ak0+ak1+ak2+ak3)[:,:,0])
+        plt.colorbar()
+    W_hat = (ak0*W0+ak1*W1+ak2*W2+ak3*W3)/(ak0+ak1+ak2+ak3)
     return W_hat
 
 
