@@ -505,6 +505,15 @@ def iterative_update_V(Y, U_hat,V_TF_,lambdas_=None,
     V_TF_2 = preprocessing.normalize(V_TF_2, norm='l2')
     return V_TF_2
 
+def plot_temporal_traces(V_TF,V_hat=None):
+    for idx, Vt_ in enumerate(np.asarray(V_TF)):
+        plt.figure(figsize=(15,5))
+        plt.title('Temporal component %d'%idx)
+        plt.plot(V_hat[idx,:]) if V_hat is not None else 0
+        plt.plot(Vt_)
+        plt.show()
+    return
+
 
 def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         maxlag=10, confidence=0.95, corr=True, mean_th=None,
@@ -579,12 +588,9 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     iteration = 0 # iteration # for part(1)
 
     # Plot V
-    if plot_en:
-        for idx, Vt_ in enumerate(V_hat):
-            plt.title('Temporal component %d'%idx)
-            plt.plot(Vt_)
-            plt.show()
-     # Plot U
+    plot_temporal_traces(V_hat) if plot_en else 0
+
+    # Plot U
     if plot_en and (not dims==None):
         tmp_u= Y.dot(V_hat.T).T#V_hat.dot(Y.T)
         for ii in range(U_hat.shape[1]):
@@ -608,12 +614,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
         outs_ = [c_l1tf_v_hat(V_hat[idx,:], diff, stdv)
                  for idx, stdv in enumerate(noise_std_)]
         V_TF, lambdas_ = map(np.asarray, zip(*np.asarray(outs_)))
-        if plot_en:
-            for idx, Vt_ in enumerate(V_TF):
-                plt.title('Temporal component %d'%idx)
-                plt.plot(V_hat[idx,:])
-                plt.plot(Vt_)
-                plt.show()
+        plot_temporal_traces(V_TF,V_hat) if plot_en else 0
 
         # normalize each V to have unit L2 norm.
         #V_TF = preprocessing.normalize(V_TF, norm='l2')
@@ -644,7 +645,6 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
 
             print('\tupdate V_i : min ||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1') if verbose else 0
             V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_,plot_en=plot_en,verbose=verbose)
-
             if U_update:
                 print('\tupdate U_j: min ||Y-UV||^2_2 + sum_j nu_j ||U_j||_1') if verbose else 0
                 #U_hat = np.asarray([c_update_U(y,V_TF,nus_[idx]) for idx, y in enumerate(Y)])
@@ -729,7 +729,8 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
         kurto=False, tfilt=False, tfide=False, mean_th=None,
         greedy=False, mean_th_factor=1.,p=1.,fudge_factor=1.,
         plot_en=False,verbose=False,U_update=False,
-        min_rank=0, pca_method='vanilla'):
+        min_rank=0, pca_method='vanilla',
+        detrend=False):
     """
     Compress array data_all as determined by parameters.
 
@@ -884,6 +885,17 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
     else:
         U = U[:,keep1].dot(np.eye(len(keep1))*s[keep1.astype(int)])
 
+    if False:#detrend:
+        #import trefide as tfd
+        #trend,_,lambdas_ = tfd.constrained_l1tf(
+        #        Vt[0,:],noise_summarizer='logmexp',noise_estimator='pwelch',
+        #        region_active_discount=.1)
+        #plot_temporal_traces(trend.T,Vt) if plot_en else 0
+        #trend = np.asarray(trend)
+        #Vt = Vt[0,:]-trend.T
+        #U = U[:,0][:,np.newaxis]
+        #print(U.shape)
+        print(U.shape)
     # call greedy
     if greedy:
         start = time.time()
@@ -896,8 +908,9 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
             ctid[0,np.arange(Vt.shape[0])]=1
         except:
             print('ERROR: Greedy solving failed, using default parameters')
-
-        #print('\t\tGreedy run for %.f'%(time.time()-start))
+            ctid[0,0]=100
+    #Vt += trend.T if detrend else 0
+    #print('\t\tGreedy run for %.f'%(time.time()-start))
     # Reconstuct matrix and add mean
     Yd = U.dot(Vt) + mu.T
     # return original matrix and add any broken pixels
@@ -1434,10 +1447,11 @@ def c_l1tf_v_hat(v,diff,sigma):
     """
     T = len(v)
     v_hat = cp.Variable(T)
-    objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
+    #objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
+    objective = cp.Minimize(cp.norm(diff*v_hat,1))
     constraints = [cp.norm(v-v_hat,2)<=sigma*np.sqrt(T)]
-    cp.Problem(objective, constraints).solve()#solver='CVXOPT')#verbose=False)
-    return v_hat.value, constraints[0].dual_value
+    cp.Problem(objective, constraints).solve()#verbose=True,solver='ECOS')#solver='CVXOPT')#solver='CVXOPT')#verbose=False)
+    return np.asarray(v_hat.value).flatten(), constraints[0].dual_value
 
 def c_l1_u_hat(y,V_TF,fudge_factor):
     """
@@ -1452,7 +1466,8 @@ def c_l1_u_hat(y,V_TF,fudge_factor):
     u_hat = cp.Variable((1,num_components))
     objective = cp.Minimize(cp.norm(u_hat,1))
     constraints = [cp.norm(
-        y[np.newaxis,:] - cp.matmul(u_hat,V_TF),2) <= np.sqrt(len(y))*fudge_factor]
+        #y[np.newaxis,:] - cp.matmul(u_hat,V_TF),2) <= np.sqrt(len(y))*fudge_factor]
+        y[np.newaxis,:] - u_hat.dot(V_TF),2) <= np.sqrt(len(y))*fudge_factor]
     problem = cp.Problem(objective,constraints)
     problem.solve(solver='CVXOPT')
     if problem.status in ["infeasible", "unbounded"]:
@@ -1474,10 +1489,11 @@ def c_update_V(v,diff,lambda_):
     else:
         objective = cp.Minimize(
             cp.norm(v-v_hat,2)**2
-            + lambda_*cp.norm(cp.matmul(diff,v_hat),1))
+            #+ lambda_*cp.norm(cp.matmul(diff,v_hat),1))
+            + lambda_*cp.norm(diff*v_hat,1))
     cp.Problem(objective).solve()#solver='CVXOPT')
-    return v_hat.value
-
+    #return v_hat.value
+    return np.asarray(v_hat.value).flatten()
 
 def c_update_U(y,V_TF,nu_):
     """
