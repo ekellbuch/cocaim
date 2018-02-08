@@ -180,7 +180,7 @@ def axcov(data, maxlag=10):
 def svd_patch(M, k=1, maxlag=10, tsub=1, ds=1,noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=True,fudge_factor=0.9,mean_th=None,
-        mean_th_factor=2.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
+        mean_th_factor=3.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
     """
     Given video M, partition video in k blocks and denoise/compress it as determined
     by the parameters.
@@ -908,7 +908,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
             ctid[0,np.arange(Vt.shape[0])]=1
         except:
             print('ERROR: Greedy solving failed, using default parameters')
-            ctid[0,0]=100
+            #ctid[0,0]=100
     #Vt += trend.T if detrend else 0
     #print('\t\tGreedy run for %.f'%(time.time()-start))
     # Reconstuct matrix and add mean
@@ -1450,7 +1450,7 @@ def c_l1tf_v_hat(v,diff,sigma):
     #objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
     objective = cp.Minimize(cp.norm(diff*v_hat,1))
     constraints = [cp.norm(v-v_hat,2)<=sigma*np.sqrt(T)]
-    cp.Problem(objective, constraints).solve()#verbose=True,solver='ECOS')#solver='CVXOPT')#solver='CVXOPT')#verbose=False)
+    cp.Problem(objective, constraints).solve(solver='ECOS',max_iters=1000)#,verbose=True)#solver='CVXOPT')#solver='CVXOPT')#verbose=False)
     return np.asarray(v_hat.value).flatten(), constraints[0].dual_value
 
 def c_l1_u_hat(y,V_TF,fudge_factor):
@@ -1491,7 +1491,7 @@ def c_update_V(v,diff,lambda_):
             cp.norm(v-v_hat,2)**2
             #+ lambda_*cp.norm(cp.matmul(diff,v_hat),1))
             + lambda_*cp.norm(diff*v_hat,1))
-    cp.Problem(objective).solve()#solver='CVXOPT')
+    cp.Problem(objective).solve(solver='ECOS',max_iters=1000)#solver='CVXOPT')
     #return v_hat.value
     return np.asarray(v_hat.value).flatten()
 
