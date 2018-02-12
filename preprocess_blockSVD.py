@@ -180,7 +180,7 @@ def axcov(data, maxlag=10):
 def svd_patch(M, k=1, maxlag=10, tsub=1, ds=1,noise_norm=False, iterate=False,
         confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=True,fudge_factor=0.9,mean_th=None,
-        mean_th_factor=3.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
+        mean_th_factor=2.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
     """
     Given video M, partition video in k blocks and denoise/compress it as determined
     by the parameters.
@@ -903,7 +903,7 @@ def compress_dblocks(data_all, dims=None, maxlag=10, tsub=1, ds=1,
             U, Vt = denoise_dblocks(data.T, U, Vt, dims=dims,
                     fudge_factor=fudge_factor, maxlag=maxlag,
                     confidence=confidence, corr=corr,
-                    kurto=kurto, mean_th=mean_th,U_update=U_update,
+                    kurto=kurto, mean_th=mean_th/mean_th_factor,U_update=U_update,
                     plot_en=plot_en,verbose=verbose,pca_method=pca_method)
             ctid[0,np.arange(Vt.shape[0])]=1
         except:
@@ -1833,4 +1833,24 @@ def c_update_U_parallel(Y,V_TF,nus_):
     pool.close()
     pool.join()
     return c_outs
+
+def extract_off(W,r_offset,c_offset,row_cut,col_cut):
+    W_rows = np.array_split(W[:,row_cut[0]:row_cut[-1],:],(row_cut+r_offset)[:-2],axis=1)
+    func_c = lambda x: (np.array_split(x,(col_cut+c_offset)[:-1],axis=0))
+    W_r_off = list(map(func_c,W_rows))
+
+    W_cols = np.array_split(W[col_cut[0]:col_cut[-1],:,:],row_array[1:-1],axis=1)
+    func_c = lambda x: (np.array_split(x,(col_cut+c_offset)[:-2],axis=0))
+    W_c_off = list(map(func_c,W_cols))
+
+    Wrc_col = np.array_split(W[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:],(row_cut+r_offset)[:-2],axis=1)
+    func_c = lambda x: (np.array_split(x,(col_cut+c_offset)[:-2],axis=0))
+    W_rc_off = list(map(func_c,Wrc_col))
+
+    W_rs = [y for x in W_r_off for y in x]
+    W_cs = [y for x in W_c_off for y in x]
+    W_rcs = [y for x in W_rc_off for y in x]
+    return W_rs,W_cs,W_rcs
+
+
 
