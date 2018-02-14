@@ -177,8 +177,8 @@ def axcov(data, maxlag=10):
     return np.real(np.divide(xcov, T))
 
 
-def svd_patch(M, k=1, maxlag=10, tsub=1, ds=1,noise_norm=False, iterate=False,
-        confidence=0.90, corr=True, kurto=False, tfilt=False, tfide=False,
+def svd_patch(M, k=1, maxlag=5, tsub=1, ds=1,noise_norm=False, iterate=False,
+        confidence=0.99, corr=True, kurto=False, tfilt=False, tfide=False,
         share_th=True, plot_en=False,greedy=True,fudge_factor=0.9,mean_th=None,
         mean_th_factor=2.,U_update=False,min_rank=1,verbose=False,pca_method='vanilla'):
     """
@@ -635,9 +635,9 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component: Y*V_TF, U,R '+str(ii), dims[:2])
 
         #################### Iterations
-        num_min_iter = 5
-        print('Iterate until F(U,V) stops decreasing significantly') if verbose else 0
-        print('For now fixed iterations as %d'%num_min_iter) if verbose else 0
+        num_min_iter = 20
+        print('Iterate until F(U,V) stops decreasing significantly (relative convergence criterion)') if verbose else 0
+        print('max iterations set as %d'%num_min_iter) if verbose else 0
         F_UVs = []
 
         for k in range(num_min_iter):
@@ -657,7 +657,6 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
                 for ii in range(U_hat.shape[1]):
                     plot_comp(tmp_u[ii,:],U_hat[:,ii],'Spatial component Y*V_TF, U, R'+str(ii), dims[:2])
 
-
             # F(U,V)=||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1 + sum_j nu_j ||U_j||_1
             # due to normalization F(U,V) may not decrease monotonically. problem?
             F_uv1 = np.linalg.norm(Y - U_hat.dot(V_TF),2)**2
@@ -667,7 +666,7 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
             F_UVs.append(F_uv)
             print('\tIter %d errors (%d+%d+%d)=%d'%(k,F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
 
-            if k >=1 and np.abs(F_uv - F_UVs[k-1]) <= 1: #will need to update this cte
+            if k >=1 and (np.abs(F_uv - F_UVs[k-1])/(np.abs(F_UVs[k-1])+np.finfo(np.float32).eps)<= np.finfo(np.float32).eps):
                 print('Stopped at iteration %d since there are no significant updates!'%k) if verbose else 0
                 break
 
@@ -703,9 +702,8 @@ def denoise_dblocks(Y, U_hat, V_hat, dims=None, fudge_factor=1,
     #################
     # if final_update:
     V_TF = iterative_update_V(Y, U_hat,V_TF,lambdas_=None,plot_en=plot_en)
-
     if U_update and final_update:
-        print('U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
+        print(' solve U(j) = argmin_W ||W||_1 st ||Y_j-W\'V_TF(j)||_2^2<T') if verbose else 0
         outs_ = [c_l1_u_hat(y,V_TF,1) for y in Y]
         U_hat, _ = map(np.asarray,zip(*np.asarray(outs_)))
     else:
@@ -1077,7 +1075,7 @@ def choose_rank(Vt,maxlag=10,iterate=False,confidence=0.90,
     return vtid
 
 
-def mean_confidence_interval(data, confidence=0.90):
+def mean_confidence_interval(data, confidence=0.90, one_sided=True):
     """
     Compute mean confidence interval (CI)
     for a normally distributed population
@@ -1090,17 +1088,22 @@ def mean_confidence_interval(data, confidence=0.90):
                 assumes gaussian-like distribution
     confidence: float
                 confidence level for test statistic
-
+    one_sided:  boolean
+                enforce a one-sided test
     Outputs:
     -------
     th:         float
                 threshold for mean value at CI
     """
     _, th = sp.stats.norm.interval(confidence,loc =np.mean(data),scale=data.std())
+    e1 = sp.stats.norm.median(loc =np.mean(data),scale=data.std())
+    if one_sided:
+        th = e1 + 0.5*th
+    #print('thr %.3f %.3f'%(e1,th))
     return th
 
 
-def covCI_wnoise(L, confidence=0.90, maxlag=10, n=3000):
+def covCI_wnoise(L, confidence=0.90, maxlag=10, n=3000,plot_en=False):
     """
     Generate n AWGN vectors lasting L samples.
     Calculate the mean of the ACF of each vector for 0:maxlag
@@ -1119,6 +1122,8 @@ def covCI_wnoise(L, confidence=0.90, maxlag=10, n=3000):
     n:          int
                 number of standard normal vectors to generate
 
+    plot_en:    boolean
+                plot histogram of pd
     Outputs:
     -------
 
@@ -1225,13 +1230,14 @@ def cov_one(Vt, mean_th=0.10, maxlag=10, iterate=False,
     """
     keep = []
     num_components = Vt.shape[0]
-    #print('mean_th is %s'%mean_th)
+    print('mean_th is %s'%mean_th) if verbose else 0
     for vector in range(0, num_components):
         # standarize and normalize
         vi = Vt[vector, :]
         vi =(vi - vi.mean())/vi.std()
+        print('vi mean = %.3f var = %.3f'%(vi.mean(),vi.var())) if verbose else 0
         vi_cov = axcov(vi, maxlag)[maxlag:]/vi.var()
-        #print(vi_cov.mean())
+        print(vi_cov.mean()) if verbose else 0
         if vi_cov.mean() < mean_th:
             if iterate is True:
                 break
@@ -1419,8 +1425,11 @@ def cn_ranks_plot(dim_block, ranks, dims):
     col_array = np.insert(cols[::K+1], 0, 0).cumsum()
 
     row_extra, col_extra = np.divide(dims[:2],[row_array[-1],col_array[-1]])==1
-    row_array = np.append(col_array,dims[0]) if not col_extra else row_array
-    col_array = np.append(col_array,dims[1]) if not row_extra else col_array
+    if not row_extra:
+        row_array = np.append(row_array,dims[1])
+    if not col_extra:
+        col_array = np.append(col_array,dims[0])
+
     x, y = np.meshgrid(row_array[:-1], col_array[:-1])
     ax3.set_yticks(col_array[:-1])
     ax3.set_xticks(row_array[:-1])
@@ -1450,7 +1459,7 @@ def c_l1tf_v_hat(v,diff,sigma):
     #objective = cp.Minimize(cp.norm(cp.matmul(diff,v_hat),1))
     objective = cp.Minimize(cp.norm(diff*v_hat,1))
     constraints = [cp.norm(v-v_hat,2)<=sigma*np.sqrt(T)]
-    cp.Problem(objective, constraints).solve(solver='ECOS',max_iters=1000)#,verbose=True)#solver='CVXOPT')#solver='CVXOPT')#verbose=False)
+    cp.Problem(objective, constraints).solve(solver='ECOS',max_iters=1000,verbose=False)#,verbose=True)#solver='CVXOPT')#solver='CVXOPT')#verbose=False)
     return np.asarray(v_hat.value).flatten(), constraints[0].dual_value
 
 def c_l1_u_hat(y,V_TF,fudge_factor):
@@ -1463,17 +1472,15 @@ def c_l1_u_hat(y,V_TF,fudge_factor):
         set U = regression Vt onto Y and \nu = 0
     """
     num_components = V_TF.shape[0]
-    u_hat = cp.Variable((1,num_components))
+    u_hat = cp.Variable(num_components)
     objective = cp.Minimize(cp.norm(u_hat,1))
-    constraints = [cp.norm(
-        #y[np.newaxis,:] - cp.matmul(u_hat,V_TF),2) <= np.sqrt(len(y))*fudge_factor]
-        y[np.newaxis,:] - u_hat.dot(V_TF),2) <= np.sqrt(len(y))*fudge_factor]
+    constraints = [cp.norm(y[np.newaxis,:] - u_hat.T*V_TF,2) < np.sqrt(len(y))*fudge_factor]
     problem = cp.Problem(objective,constraints)
-    problem.solve(solver='CVXOPT')
+    problem.solve(solver='CVXOPT',verbose=False)
     if problem.status in ["infeasible", "unbounded"]:
         return y[np.newaxis,:].dot(np.linalg.pinv(V_TF)).flatten(), 0
     else:
-        return u_hat.value.flatten(), constraints[0].dual_value
+        return np.asarray(u_hat.T.value).flatten(), constraints[0].dual_value
 
 
 def c_update_V(v,diff,lambda_):
@@ -1502,16 +1509,17 @@ def c_update_U(y,V_TF,nu_):
     min  ||y_j-u_j*v||_2^2 + nu_j ||u_j||_1.
     """
     num_components = V_TF.shape[0]
-    u_hat = cp.Variable((1,num_components))
+    u_hat = cp.Variable(num_components)
     if nu_ == 0:
         objective = cp.Minimize(
-                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2)
+                #cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2)
+                cp.norm(y[np.newaxis,:]-u_hat.T*V_TF,2)**2)
     else:
         objective = cp.Minimize(
-                cp.norm(y[np.newaxis,:]-cp.matmul(u_hat,V_TF),2)**2+ nu_*cp.norm(u_hat,1))
+                cp.norm(y[np.newaxis,:]-u_hat.T*V_TF,2)**2+ nu_*cp.norm(u_hat,1))
     problem = cp.Problem(objective)
-    problem.solve(solver='CVXOPT')
-    return u_hat.value.flatten()
+    problem.solve(solver='CVXOPT',verbose=False)
+    return np.asarray(u_hat.T.value).flatten()
 
 
 def plot_comp(Y,Y_hat,title_,dims,idx_=0):
