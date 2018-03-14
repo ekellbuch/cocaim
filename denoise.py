@@ -46,7 +46,7 @@ def temporal(W,
                                               min_rank=min_rank,
                                               stim_knots=stim_knots,
                                               stim_delta=stim_delta)
-    print('Run_time: %f'%(time.time()-start))
+    print('Temporal denoiser run for %.3f sec'%(time.time()-start))
     return mov_d, ranks
 
 
