@@ -1,7 +1,7 @@
 # Cocaim
 Compression and denoising of Calcium Imaging recordings
 
-Example Run_block-svd.ipynb
+Example Demo_denoiser.ipynb
 Dataset from https://github.com/simonsfoundation/CaImAn
 
 ## Comments:
