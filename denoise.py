@@ -1,10 +1,13 @@
 import spatial_filtering
 import tool_grid
 import time
+import noise_estimator
+
 # ____________________________
 # Wrapper to call denoisers
 # see individual functions for more information
 # ____________________________
+
 
 def spatial(Y_new,
             gHalf=[2,2],
@@ -33,7 +36,7 @@ def temporal(W,
     """
     Calls greedy temporal denoiser in pixel neighborhood
     """
-    start = time.time()
+    #start = time.time()
     mov_d, ranks = tool_grid.denoise_dx_tiles(W,
                                               nblocks=nblocks,
                                               dx=dx,
@@ -46,7 +49,7 @@ def temporal(W,
                                               min_rank=min_rank,
                                               stim_knots=stim_knots,
                                               stim_delta=stim_delta)
-    print('Temporal denoiser run for %.3f sec'%(time.time()-start))
+    #print('Temporal denoiser run for %.3f sec'%(time.time()-start))
     return mov_d, ranks
 
 
@@ -55,6 +58,6 @@ def noise_level(mov_wf,
     """
     Calculate noise level in movie pixels
     """
-    noise_level = spatial_filtering.noise_estimator(mov_wf,
-                                                    range_ff=range_ff)
+    noise_level = noise_estimator.get_noise_fft(mov_wf,
+                                                    noise_range=range_ff)[0]
     return noise_level

@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 #import preprocess_blockSVD as pre_svd
 
@@ -9,92 +10,7 @@ from math import ceil
 
 from functools import partial
 from itertools import product
-###################
-# Deprecated
-###################
 
-def extract_4dx_grid(dims,
-                     row_array,
-                     col_array):
-    """
-    Given the dimenions of a matrix (dims), which was
-    split row and column wise according to row_array,col_array,
-    Calculate the offset in which to split the
-    Inputs:
-    -------
-
-
-    Outputs:
-    -------
-    """
-    #x,y = np.meshgrid(row_array[:],col_array[:])
-    r_offset = np.ceil(np.divide(np.diff(row_array),2)).astype('int')
-    c_offset = np.ceil(np.divide(np.diff(col_array),2)).astype('int')
-
-    # calculate the dimensions of three off-grid splits
-    #row_cut = row_array[:-1]+r_offset
-    #col_cut = col_array[:-1]+c_offset
-
-    #dims_rs = dims[0],row_cut[-1]-row_cut[0],dims[2]
-    #dims_cs = col_cut[-1]-col_cut[0],dims[1],dims[2]
-    #dims_rcs = col_cut[-1]-col_cut[0],row_cut[-1]-row_cut[0],dims[2]
-    return r_offset,c_offset
-
-
-def extract_off(W,r_offset,c_offset,row_cut,col_cut):
-    """
-    Given a matrix W, which was split row and column wise
-    given row_cut,col_cut, calculate three off-grid splits
-    of the same matrix. Each offgrid will be only row-,
-    only column-, and row and column-wise.
-    Inputs:
-    -------
-    W:          np.array (d1 x d2 x T)
-    r_offset:
-    c_offset:
-    row_cut:
-    col_cut:
-
-    Outputs:
-    --------
-    W_rs:       list
-    W_cs:       list
-    W_rcs:      list
-    """
-    W_rows = np.array_split(W[:,row_cut[0]:row_cut[-1],:],
-                            (row_cut+r_offset)[:-2],
-                            axis=1)
-
-    func_c = lambda x: (np.array_split(x,
-                                       (col_cut+c_offset)[:-1],
-                                       axis=0))
-
-    W_r_off = list(map(func_c,W_rows))
-
-    W_cols = np.array_split(
-        W[col_cut[0]:col_cut[-1],:,:],
-        (row_cut+r_offset)[:-1],axis=1)
-
-    func_c = lambda x: (np.array_split(x,
-                                       (col_cut+c_offset)[:-2],
-                                       axis=0))
-    W_c_off = list(map(func_c,W_cols))
-
-    Wrc_col = np.array_split(W[col_cut[0]:col_cut[-1],
-                               row_cut[0]:row_cut[-1],:],
-                               (row_cut+r_offset)[:-2],axis=1)
-    #func_c = lambda x: (np.array_split(x,(col_cut+c_offset)[:-2],axis=0))
-    W_rc_off = list(map(func_c,Wrc_col))
-
-    W_rs = [y for x in W_r_off for y in x]
-    W_cs = [y for x in W_c_off for y in x]
-    W_rcs = [y for x in W_rc_off for y in x]
-    return W_rs, W_cs, W_rcs
-
-###################
-# END Deprecated
-###################
-###########################################
 def block_split_size(l,n):
     """
     For an array of length l that should be split into n sections,
@@ -113,7 +29,6 @@ def block_split_size(l,n):
     d:      np.array (n,)
             length of each partitioned array.
     """
-
     d = np.zeros((n,)).astype('int')
     cut = l%n
     d[:cut] = l//n+1
@@ -141,6 +56,7 @@ def split_image_into_blocks(image, nblocks=[10,10]):
                     each of dimensions (d1' x d2' x T)
                     in fortran 'F' order.
     """
+
     if all(isinstance(n, int) for n in nblocks):
         number_of_blocks = np.prod(nblocks)
     else:
@@ -191,17 +107,16 @@ def tile_grids(dims,
     Input:
     ------
 
-
     Output:
     ------
     """
-    
+
     if all(isinstance(n, int) for n in nblocks):
         d_row = block_split_size(dims[0],nblocks[0])
         d_col = block_split_size(dims[1],nblocks[1])
     else:
         d_row,d_col=nblocks
-        
+
     if indiv_grids:
         d_row = np.insert(d_row,0,0)
         d_col = np.insert(d_col,0,0)
@@ -213,14 +128,14 @@ def tile_grids(dims,
     d_col = np.diff(np.insert(d_col,0,0))
 
     number_of_blocks = (len(d_row))*(len(d_col))
-    
+
     #row_array = np.zeros((number_blocks,))
     #col_array = np.zeros((number_blocks,))
     array = np.zeros((number_of_blocks,2))
 
     for ii,row in enumerate(product(d_row,d_col)):
         array[ii]=row
-        
+
     """
     # for each row
     for ii in range(nblocks[0]):
@@ -246,29 +161,33 @@ def offset_tiling_dims(dims,nblocks,offset_case=None):
 
     rc0, rc1 = (row_array[1:]-r_offset)[[0,-1]]
     cc0, cc1 = (col_array[1:]-c_offset)[[0,-1]]
-    
+
     if offset_case is None:
         row_array=row_array[1:-1]
         col_array=col_array[1:-1]
+
     elif offset_case == 'r':
         dims = rc1-rc0,dims[1],dims[2]
         row_array=row_array[1:-2]
         col_array=col_array[1:-1]
+
     elif offset_case == 'c':
         dims = dims[0],cc1-cc0,dims[2]
         row_array=row_array[1:-1]
         col_array=col_array[1:-2]
+
     elif offset_case == 'rc':
         dims = rc1-rc0,cc1-cc0,dims[2]
         row_array=row_array[1:-2]
         col_array=col_array[1:-2]
+
     else:
         print('Invalid option')
-        
+
     indiv_dim = tile_grids(dims,
                            nblocks=[row_array,col_array],
                            indiv_grids=False)
-    return dims,indiv_dim
+    return dims, indiv_dim
 
 
 def offset_tiling(W,nblocks=[10,10],offset_case=None):
@@ -291,7 +210,7 @@ def offset_tiling(W,nblocks=[10,10],offset_case=None):
     W_cs:       list
     W_rcs:      list
     """
-    
+
     #col_array,row_array = tile_grids(dims,nblocks)
 
     #r_offset,c_offset = extract_4dx_grid(dims,row_array,col_array)
@@ -300,14 +219,14 @@ def offset_tiling(W,nblocks=[10,10],offset_case=None):
 
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
-    
+
     rc0, rc1 = (row_array[1:]-r_offset)[[0,-1]]
     cc0, cc1 = (col_array[1:]-c_offset)[[0,-1]]
-    
+
     if offset_case is None:
         W_off = split_image_into_blocks(W,
                                         nblocks=nblocks)
-        
+
     elif offset_case == 'r':
         W = W[rc0:rc1,:,:]
         W_off = split_image_into_blocks(W,
@@ -317,7 +236,7 @@ def offset_tiling(W,nblocks=[10,10],offset_case=None):
         W = W[:,cc0:cc1,:]
         W_off = split_image_into_blocks(W,
                                         nblocks=[row_array[1:-1],
-                                                 col_array[1:-2]])        
+                                                 col_array[1:-2]])
     elif offset_case == 'rc':
         W = W[rc0:rc1,cc0:cc1,:]
         W_off = split_image_into_blocks(W,
@@ -363,10 +282,15 @@ def denoise_dx_tiles(W,
                              mean_th_factor=mean_th_factor,
                              U_update=U_update,
                              min_rank=min_rank)
+
     dims_ = list(map(np.shape,dW_))
-    dW_ = combine_blocks(dims,dW_,list_order='C')
+    dW_ = combine_blocks(dims,
+                        dW_,
+                        list_order='C')
+
     if dx ==1:
         return dW_, rank_W_
+
     del W_
     W_rs, drs = offset_tiling(W,
                              nblocks=nblocks,
@@ -383,13 +307,16 @@ def denoise_dx_tiles(W,
                                  mean_th_factor=mean_th_factor,
                                  U_update=U_update,
                                  min_rank=min_rank)
+
     dims_rs = list(map(np.shape,dW_rs))
-    dW_rs = combine_blocks(drs,dW_rs,list_order='C')
+
+    dW_rs = combine_blocks(drs,
+                        dW_rs,
+                        list_order='C')
     del W_rs
     W_cs, dcs = offset_tiling(W,
-                     nblocks=nblocks,
-                     offset_case='c')
-
+                            nblocks=nblocks,
+                            offset_case='c')
 
     dW_cs,rank_W_cs = run_single(W_cs,
                                  maxlag=maxlag,
@@ -400,8 +327,12 @@ def denoise_dx_tiles(W,
                                  min_rank=min_rank)
 
     dims_cs = list(map(np.shape,dW_cs))
-    dW_cs = combine_blocks(dcs,dW_cs,list_order='C')
+
+    dW_cs = combine_blocks(dcs,
+                        dW_cs,
+                        list_order='C')
     del W_cs
+
     W_rcs, drcs = offset_tiling(W,
                       nblocks=nblocks,
                       offset_case='rc')
@@ -413,11 +344,17 @@ def denoise_dx_tiles(W,
                              mean_th_factor=mean_th_factor,
                              U_update=U_update,
                              min_rank=min_rank)
+
     dims_rcs = list(map(np.shape,dW_rcs))
-    dW_rcs = combine_blocks(drcs,dW_rcs,list_order='C')
+
+    dW_rcs = combine_blocks(drcs,
+                            dW_rcs,
+                            list_order='C')
     del W_rcs
-    if False:
+
+    if False: # debug
         return nblocks, dW_, dW_rs, dW_cs, dW_rcs, dims_, dims_rs, dims_cs, dims_rcs
+
     W_four = combine_4xd(nblocks,
                          dW_,
                          dW_rs,
@@ -445,7 +382,7 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
 
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
-    
+
     r1, r2 = (row_array[1:]-r_offset)[[0,-1]]
     c1, c2 = (col_array[1:]-c_offset)[[0,-1]]
 
@@ -458,7 +395,7 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
     ak1 = np.zeros(dims[:2])
     ak2 = np.zeros(dims[:2])
     ak3 = np.zeros(dims[:2])
-    
+
     ak0 = pyramid_tiles(dims,
                         dims_,
                         list_order='C')
@@ -475,7 +412,7 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
     ak3[r1:r2,c1:c2] = pyramid_tiles(drcs,
                                        dims_rcs,
                                        list_order='C')
-    
+
     # Force outer most border = 1
     ak0[[0,-1],:]=1
     ak0[:,[0,-1]]=1
@@ -512,6 +449,7 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
 
 
 def run_single(Y,
+            parallel=True,
                maxlag=5,
                confidence=0.999,
                greedy=False,
@@ -537,10 +475,136 @@ def run_single(Y,
             rank or final number of components stored for each movie.
     ------
     """
-    cpu_count = multiprocessing.cpu_count()
+
+    def mp_worker(data_in,out_q):
+        """ The worker function, invoked in a process
+            'nums' is the input.
+            The results are placed in a dictionary that's pushed to a queue.
+        """
+        outdict={}
+        print('Len is %d'%len(data_in))
+        for ii, patch in enumerate(data_in):
+            print('Run for %d'%ii)
+            print(patch.shape)
+            outdict[ii] = gpca.denoise_patch(patch,
+                                  maxlag=maxlag,
+                                  confidence=confidence,
+                                  greedy=greedy,
+                                  fudge_factor=fudge_factor,
+                                  mean_th_factor=mean_th_factor,
+                                  U_update=U_update,
+                                  min_rank=min_rank,
+                                  stim_knots=stim_knots,
+                                  stim_delta=stim_delta)
+            print('out_q')
+        out_q.put(outdict)
+
+    # Each process will get 'chunksize' nums and a queue to put his out
+    # dict
+    # Parallel not for mac os single numpy default does not run with lapack
+    if sys.platform == 'darwin':
+        #print('Darwin')
+        parallel = False
+
     start=time.time()
-    pool = multiprocessing.Pool(cpu_count-1)
+
+    if parallel:
+
+        nprocs = 1
+        out_q = multiprocessing.Queue()
+        chunksize = int(ceil(len(Y) / float(nprocs)))
+        procs = []
+
+        for i in range(nprocs):
+            p = multiprocessing.Process(
+                    target=mp_worker,
+                    args=(Y[chunksize * i:chunksize * (i + 1)],
+                          out_q))
+            procs.append(p)
+            p.start()
+
+        # Collect all results into a single result dict. We know how many dicts
+        # with results to expect.
+        resultdict = {}
+        for i in range(nprocs):
+            resultdict.update(out_q.get())
+
+        # Wait for all worker processes to finish
+        for p in procs:
+            p.join()
+
+        c_outs = resultdict
+        #print(len(c_outs))
+
+        Yds = [out_[0] for out_ in c_outs]
+        vtids = [out_[1] for out_ in c_outs]
+
+    else:
+        Yds = [None]*len(Y)
+        vtids = [None]*len(Y)
+        for ii, patch in enumerate(Y):
+            resultdict = gpca.denoise_patch(patch,
+                                  maxlag=maxlag,
+                                  confidence=confidence,
+                                  greedy=greedy,
+                                  fudge_factor=fudge_factor,
+                                  mean_th_factor=mean_th_factor,
+                                  U_update=U_update,
+                                  min_rank=min_rank,
+                                  stim_knots=stim_knots,
+                                  stim_delta=stim_delta)
+            Yds[ii]=resultdict[0]
+            vtids[ii]=resultdict[1]
+
+    vtids = np.asarray(vtids).astype('int')
+
+    print('Run single video run time: %f'%(time.time()-start))
+    return Yds, vtids
+
+    #args=[[patch] for patch in Y]
+    #cpu_count = 1#max(1, multiprocessing.cpu_count()-1)
+    #pool = multiprocessing.Pool(cpu_count)
+    #print('Running %d blocks in %d cpus'%(len(Y),cpu_count)) #if verbose else 0
+
+    #print('Run single video run time: %f'%(time.time()-start))
+    #Yds = [out_[0] for out_ in c_outs]
+    #vtids = [out_[1] for out_ in c_outs]
+    #vtids = np.asarray(vtids).astype('int')
+    #return Yds, vtids
+
+
+def run_single_deprecated(Y,
+               maxlag=5,
+               confidence=0.999,
+               greedy=False,
+               fudge_factor=0.99,
+               mean_th_factor=1.15,
+               U_update=False,
+               min_rank=1,
+               stim_knots=None,
+               stim_delta=200):
+    """
+    Run denoiser in each movie in the list Y.
+    GIL (Global Interpreter Lock) issues
+    Inputs:
+    ------
+    Y:      list (number_movies,)
+            list of 3D movies, each of dimensions (d1,d2,T)
+            Each element in the list can be of different size.
+    Outputs:
+    --------
+    Yds:    list (number_movies,)
+            list of denoised 3D movies, each of same dimensions
+            as the corresponding input movie.input
+    vtids:  list (number_movies,)
+            rank or final number of components stored for each movie.
+    ------
+    """
     args=[[patch] for patch in Y]
+    cpu_count = 1#max(1, multiprocessing.cpu_count()-1)
+    start=time.time()
+    pool = multiprocessing.Pool(cpu_count)
+    print('Running %d blocks in %d cpus'%(len(Y),cpu_count)) #if verbose else 0
     # define params in function
     c_outs = pool.starmap(partial(gpca.denoise_patch,
                                   maxlag=maxlag,
@@ -552,14 +616,16 @@ def run_single(Y,
                                   min_rank=min_rank,
                                   stim_knots=stim_knots,
                                   stim_delta=stim_delta),
-                          args)
+                                args)
     pool.close()
     pool.join()
-    print('Total run time: %f'%(time.time()-start))
+
+    print('Run single video run time: %f'%(time.time()-start))
     Yds = [out_[0] for out_ in c_outs]
     vtids = [out_[1] for out_ in c_outs]
     vtids = np.asarray(vtids).astype('int')
-    return Yds,vtids
+
+    return Yds, vtids
 
 
 def pyramid_matrix(dims,plot_en=False):

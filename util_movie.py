@@ -9,25 +9,76 @@ import pylab as pl
 
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-import caiman as cm
+import skvideo.io
+
+def movie_writer(mov,
+                mov_den,
+                fname_out_movie,
+                video_length,
+                min_unit=255,
+                min_single_frame=True):
+
+    # Truncate movie
+    video_length = min(mov.shape[2],
+                        video_length)
+
+    mov = mov[:,:,:video_length].transpose([2,0,1])
+    mov_den = mov_den[:,:,:video_length].transpose([2,0,1])
+    mov_res = mov-mov_den
+
+    ax_ = (0)
+    if min_single_frame:
+        mov = mov - mov.min(axis=ax_,keepdims=True)
+        mov_den = mov_den - mov_den.min(axis=ax_,keepdims=True)
+        mov_res = mov_res - mov_res.min(axis=ax_,keepdims=True)
+
+    mov = (mov - mov.min())/(mov.max() - mov.min())*min_unit;
+    mov_den = (mov_den - mov_den.min())/(mov_den.max() - mov_den.min())*min_unit;
+    mov_res = (mov_res - mov_res.min())/(mov_res.max() - mov_res.min())*min_unit;
+
+    #mov = video_normalization(mov)
+    #mov_den = video_normalization(mov_den)
+    #mov_res = video_normalization(mov_res)
+
+    movie_frames = np.concatenate([mov,
+                                mov_den,
+                                mov-mov_den
+                                ],
+                                axis=2)
+
+    writer = skvideo.io.FFmpegWriter(fname_out_movie)
+
+    for frame in range(video_length):
+        writer.writeFrame(movie_frames[frame,:,:])
+    writer.close()
+    return
 
 
-def video_normalization(Y,smin=True,dmax=True):
+def video_normalization(Y,
+                        smin=True,
+                        dmax=True):
     """
     Normalize video
+    min is wrt all pixels in all frames
+    max is wrt all pixels in all frames
     """
     if len(Y) ==0:
         return Y
 
     Yout = np.copy(Y)
     if smin is True:
-        Yout = Yout-Yout.min()+1
+        Yout = Yout-Yout.min()
     if dmax is True:
         Yout = np.true_divide(Yout,Yout.max())
     return Yout
 
 
-def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,gains=1):
+def draw_video_init(video,
+                    max_time=None,
+                    xtick=None,
+                    ytick=None,
+                    share_scale=False,
+                    gains=1):
     wsize , hsize , num_tframe = video[0][0].shape
     # define num_plots (num rows and num cols)
     num_rows = len(video)
@@ -41,7 +92,8 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
     wratio =[wsize/wsize]*num_cols
     hratio =[hsize/wsize]*num_rows
 
-    fig = plt.figure(figsize=(6*num_cols, 6*num_rows))
+    fig = plt.figure(figsize=(6*num_cols,
+                            6*num_rows))
     gs1 = gridspec.GridSpec(num_rows, num_cols,
                            width_ratios = wratio,
                             height_ratios = hratio)
@@ -117,7 +169,7 @@ def draw_video_init(video,max_time=None,xtick=None,ytick=None,share_scale=False,
 
 def draw_video(anim, fps=10, store=False, name='tmp.mp4'):
     if store:
-        anim.save(name, fps=fps,extra_args=['-vcodec', 'libx264'])
+        anim.save(name, fps=fps, extra_args=['-vcodec', 'libx264'])
         #video = open(name, "rb").read()
         #anim._encoded_video = video.encode("base64")
     return HTML(anim.to_html5_video())
@@ -169,7 +221,7 @@ def Vt_denoised_video(Vt,Vts):
         return l1,l2,l3
 
 
-    anim = animation.FuncAnimation(fig, animate, 
+    anim = animation.FuncAnimation(fig, animate,
             frames=np.arange(num_components-1), init_func=init,blit=False,
             interval=1000)
     # HTML(anim.to_html5_video())

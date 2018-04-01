@@ -1,21 +1,177 @@
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import tool_grid as tgrid
 import numpy as np
-import matplotlib.pyplot as plt
+import cv2
 import scipy.ndimage.filters as filters
-import caiman as cm
-from caiman.summary_images import local_correlations_fft
+from scipy.ndimage.filters import convolve
+
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.pyplot as plt
+
+#import caiman as cm
 import tools as tools_
 import tool_grid as tgrid
+import noise_estimator
 
+
+def correlation_pnr(Y,
+                    gSig=None,
+                    center_psf=True,
+                    swap_dim=True):
+    """
+    compute the correlation image and the peak-to-noise ratio (PNR) image.
+    If gSig is provided, then spatially filtered the video.
+
+    Args:
+        Y:  np.ndarray (3D or 4D).
+            Input movie data in 3D or 4D format
+        gSig:  scalar or vector.
+            gaussian width. If gSig == None, no spatial filtering
+        center_psf: Boolearn
+            True indicates subtracting the mean of the filtering kernel
+        swap_dim: Boolean
+            True indicates that time is listed in the last axis of Y (matlab format)
+            and moves it in the front
+
+    Returns:
+        cn: np.ndarray (2D or 3D).
+            local correlation image of the spatially filtered (or not)
+            data
+        pnr: np.ndarray (2D or 3D).
+            peak-to-noise ratios of all pixels/voxels
+
+    """
+    if swap_dim:
+        Y = np.transpose(
+            Y, tuple(np.hstack((Y.ndim - 1,
+                list(range(Y.ndim))[:-1]))))
+
+    # parameters
+    _, d1, d2 = Y.shape
+    data_raw = Y.reshape(-1, d1, d2).astype('float32')
+
+    # filter data
+    data_filtered = data_raw.copy()
+    if gSig:
+        if not isinstance(gSig, list):
+            gSig = [gSig, gSig]
+        ksize = tuple([(3 * i) // 2 * 2 + 1 for i in gSig])
+        # create a spatial filter for removing background
+        # psf = gen_filter_kernel(width=ksize, sigma=gSig, center=center_psf)
+
+        if center_psf:
+            for idx, img in enumerate(data_filtered):
+                data_filtered[idx, ] = cv2.GaussianBlur(img,
+                                                        ksize=ksize,
+                                                        sigmaX=gSig[0],
+                                                        sigmaY=gSig[1],
+                                                        borderType=1) \
+                    - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
+            # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
+        else:
+            for idx, img in enumerate(data_filtered):
+                data_filtered[idx, ] = cv2.GaussianBlur(
+                    img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1)
+
+    # compute peak-to-noise ratio
+    data_filtered -= np.mean(data_filtered, axis=0)
+    data_max = np.max(data_filtered, axis=0)
+    data_std = noise_estimator.get_noise_fft(data_filtered.transpose())[0].transpose()
+    # data_std = get_noise(data_filtered, method='diff2_med')
+
+    pnr = np.divide(data_max, data_std)
+    pnr[pnr < 0] = 0
+
+    # remove small values
+    tmp_data = data_filtered.copy() / data_std
+    tmp_data[tmp_data < 3] = 0
+
+    # compute correlation image
+    # cn = local_correlation(tmp_data, d1=d1, d2=d2)
+    cn = local_correlations_fft(tmp_data, swap_dim=False)
+
+    return cn, pnr
+
+
+def local_correlations_fft(Y,
+                            eight_neighbours=True,
+                            swap_dim=True,
+                            opencv=True):
+    """Computes the correlation image for the input dataset Y using a faster FFT based method
+
+    Parameters:
+    -----------
+
+    Y:  np.ndarray (3D or 4D)
+        Input movie data in 3D or 4D format
+
+    eight_neighbours: Boolean
+        Use 8 neighbors if true, and 4 if false for 3D data (default = True)
+        Use 6 neighbors for 4D data, irrespectively
+
+    swap_dim: Boolean
+        True indicates that time is listed in the last axis of Y (matlab format)
+        and moves it in the front
+
+    opencv: Boolean
+        If True process using open cv method
+
+    Returns:
+    --------
+
+    Cn: d1 x d2 [x d3] matrix, cross-correlation with adjacent pixels
+
+    """
+
+    if swap_dim:
+        Y = np.transpose(
+            Y, tuple(np.hstack((Y.ndim - 1, list(range(Y.ndim))[:-1]))))
+
+    Y = Y.astype('float32')
+    Y -= np.mean(Y, axis=0)
+    Ystd = np.std(Y, axis=0)
+    Ystd[Ystd == 0] = np.inf
+    Y /= Ystd
+
+    if Y.ndim == 4:
+        if eight_neighbours:
+            sz = np.ones((3, 3, 3), dtype='float32')
+            sz[1, 1, 1] = 0
+        else:
+            sz = np.array([[[0, 0, 0], [0, 1, 0], [0, 0, 0]],
+                           [[0, 1, 0], [1, 0, 1], [0, 1, 0]],
+                           [[0, 0, 0], [0, 1, 0], [0, 0, 0]]], dtype='float32')
+    else:
+        if eight_neighbours:
+            sz = np.ones((3, 3), dtype='float32')
+            sz[1, 1] = 0
+        else:
+            sz = np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], dtype='float32')
+
+    if opencv and Y.ndim == 3:
+        Yconv = Y.copy()
+        for idx, img in enumerate(Yconv):
+            Yconv[idx] = cv2.filter2D(img, -1, sz, borderType=0)
+        MASK = cv2.filter2D(
+            np.ones(Y.shape[1:], dtype='float32'), -1, sz, borderType=0)
+    else:
+        Yconv = convolve(Y, sz[np.newaxis, :], mode='constant')
+        MASK = convolve(
+            np.ones(Y.shape[1:], dtype='float32'), sz, mode='constant')
+    Cn = np.mean(Yconv * Y, axis=0) / MASK
+    return Cn
 
 def cn_ranks_dx_plot(ranks,
                   dims,
                   nblocks=[10, 10],
                     figsize=15,
-                    fontsize=20):
+                    fontsize=20,
+                    tile_err=100,
+                    include_err=True):
     rtype=[None,'r','c','rc']
     for ii,rank in enumerate(ranks):
+        if not include_err:
+            rank=rank%tile_err
+            rank[rank==0]=1
+
         cn_ranks_plot(rank,
                   dims,
                   nblocks=nblocks,
@@ -23,8 +179,7 @@ def cn_ranks_dx_plot(ranks,
                      figsize=figsize,
                      fontsize=fontsize)
     return
-        
-        
+
 
 def cn_ranks_plot(ranks,
                   dims,
@@ -50,23 +205,23 @@ def cn_ranks_plot(ranks,
     Cplot3:         np.array
                     array of ranks per tile
     """
-    
+
      #offset_tiling_dims(dims,nblocks,offset_case=None):
 
     dims, dim_block = tgrid.offset_tiling_dims(dims,
                                                nblocks,
                                                offset_case=offset_case)
-    
-    
+
+
     K1 = nblocks[0] - 1
     K2 = nblocks[1] - 1
-    
+
     K1 = K1-1 if offset_case =='r' else K1
     K2 =K2-1 if offset_case =='c' else K2
     K1 =K1-1 if offset_case =='rc' else K1
     K2 =K2-1 if offset_case =='rc' else K2
-        
-    
+
+
     Cplot3 = tgrid.cn_ranks(dim_block, ranks,
                             dims[:2], list_order=list_order)
     d1, d2 = dims[:2] // np.min(dims[:2])
@@ -93,16 +248,17 @@ def cn_ranks_plot(ranks,
 
     dim_block = np.asarray(dim_block)
     cols, rows = dim_block.T[0], dim_block.T[1]
-    
+
 
     row_array = np.insert(rows[::K1 + 1], 0, 0).cumsum()
     col_array = np.insert(cols[::K2 + 1], 0, 0).cumsum()
 
-    x, y = np.meshgrid(row_array[:-1], col_array[:-1])
+    x, y = np.meshgrid(row_array[:-1],
+                        col_array[:-1])
     ax3.set_yticks(col_array[:-1])
     ax3.set_xticks(row_array[:-1])
 
-    for ii, (row_val, col_val) in enumerate(zip(x.flatten(order=list_order), 
+    for ii, (row_val, col_val) in enumerate(zip(x.flatten(order=list_order),
                                                 y.flatten(order=list_order))):
         c = str(int(Cplot3[int(col_val + 1), int(row_val + 1)]) % max_rank)
         ax3.text(row_val + rows[ii] / 2, col_val +
@@ -246,8 +402,8 @@ def show_img(ax,
                                 vmax,
                                 cbar_ticks_number,
                                 endpoint=True)
-        cbar_ticks=np.round(cbar_ticks,4)   
-        cbar_ticks_labels= [format_tile%(cbar_) 
+        cbar_ticks=np.round(cbar_ticks,4)
+        cbar_ticks_labels= [format_tile%(cbar_)
                             for cbar_ in cbar_ticks]
         vmin, vmax = cbar_ticks[0], cbar_ticks[-1]
 
@@ -280,7 +436,6 @@ def show_img(ax,
                         spacing='uniform',
                         format=format_tile,
                         ticks=cbar_ticks)
-
     return
 
 
@@ -325,36 +480,36 @@ def comparison_plot(cn_see,
     # Calculate Cn to plot
     #######################
     for ii, array in enumerate(cn_see):
-        print(array.shape)        
+        #print(array.shape)
         if option =='corr': # Correlation
-            Cn, _ = cm.summary_images.correlation_pnr(array,
-                                                      gSig=None,
-                                                      center_psf=False,
-                                                      swap_dim=True) # 10 no ds
+            Cn, _ = correlation_pnr(array,
+                                    gSig=None,
+                                    center_psf=False,
+                                    swap_dim=True) # 10 no ds
+
             title_prefix = 'Local correlation: '
         elif option =='var': #Variance
             Cn = array.var(2)/array.shape[2]
             title_prefix = 'Pixel variance: '
-            print(Cn.min())
-            print(Cn.max())
+            #print(Cn.min())
+            #print(Cn.max())
         elif option =='pnr': # PNR
-            _, Cn = cm.summary_images.correlation_pnr(array,
-                                                      gSig=None,
-                                                      center_psf=False,
-                                                      swap_dim=True)
+            _, Cn = correlation_pnr(array,
+                                    gSig=None,
+                                    center_psf=False,
+                                    swap_dim=True)
         elif option=='input':
             Cn =array - array.min()
             Cn = Cn/Cn.max()
             title_prefix = 'Single Frame: '
-        print ('%s range [%.1e %.1e]'%(title_prefix,
-                                   Cn.min(),
-                                   Cn.max()))
+        #print ('%s range [%.1e %.1e]'%(title_prefix,
+        #                           Cn.min(),
+        #                           Cn.max()))
         Cn_all.append(Cn)
 
     #######################
     # Plot configuration
     #######################
-
     vmax_ = list(map(np.max,Cn_all))
     vmin_ = list(map(np.min,Cn_all))
 
@@ -377,9 +532,8 @@ def comparison_plot(cn_see,
                               sharey=sharey)
 
     #cbar_enable= [False,False,True]
-    #if share_colorbar:
     cbar_enable= not share_colorbar
-    
+
 
     for ii, Cn in enumerate(Cn_all):
         show_img(axarr[ii],
@@ -463,9 +617,7 @@ def tiling_grid_plot(W,
     """
     """
     dims = W.shape
-
     col_array, row_array = tgrid.tile_grids(dims, nblocks)
-
     x, y = np.meshgrid(row_array, col_array)
     if plot_option == 'var':
         Cn1 = W.var(2)
@@ -477,5 +629,43 @@ def tiling_grid_plot(W,
     plt.plot(x.T, y.T)
     plt.plot(x, y)
     plt.imshow(Cn1)
+    plt.show()
+    return
+
+def spatial_filter_spixel_plot(data,y_hat,hat_k):
+    Cn_y, _ = correlation_pnr(data) #
+    Cn_yh,_ = correlation_pnr(y_hat)
+
+    fig,ax = plt.subplots(1,3,figsize=(10,5))
+    im0 = ax[0].imshow(Cn_y.T,vmin=maps[0],vmax=maps[1])
+    if neuron_indx is None:
+        im1 = ax[1].imshow(hat_k)
+    else:
+        im1 = ax[1].imshow(hat_k[:,np.newaxis].T)
+    im2 = ax[2].imshow(Cn_yh.T,vmin=maps[0],vmax=maps[1])
+    ax[0].set_title('y')
+    ax[1].set_title('k')
+    ax[2].set_title('y_hat')
+
+    ax[0].set_xticks(np.arange(y_hat.shape[0]))
+    ax[0].set_yticks(np.arange(y_hat.shape[1]))
+    ax[2].set_xticks(np.arange(y_hat.shape[0]))
+    ax[2].set_yticks(np.arange(y_hat.shape[1]))
+    ax[1].set_yticks(np.arange(1))
+
+    if neuron_indx is None:
+        ax[1].set_xticks(np.arange(np.prod(y_hat.shape[:2]))[::4])
+        ax[1].set_yticks(np.arange(np.prod(y_hat.shape[:2]))[::4])
+
+    divider0 = make_axes_locatable(ax[0])
+    cax0 = divider0.append_axes("bottom", size="5%", pad=0.5)
+    cbar0 = plt.colorbar(im0, cax=cax0, orientation='horizontal')
+    divider1 = make_axes_locatable(ax[1])
+    cax1 = divider1.append_axes("bottom", size="5%", pad=0.5)
+    cbar1 = plt.colorbar(im1, cax=cax1, format="%.2f", orientation='horizontal')
+    divider2 = make_axes_locatable(ax[2])
+    cax2 = divider2.append_axes("bottom", size="5%", pad=0.5)
+    cbar2 = plt.colorbar(im2, cax=cax2, orientation='horizontal')
+    plt.tight_layout()
     plt.show()
     return

@@ -1,13 +1,42 @@
 import numpy as np
 import scipy as sp
 
+# use get_noise_fft
+
+
+def noise_estimator(Y,range_ff=[0.25,0.5],method='logmexp'):
+    dims = Y.shape
+    if len(dims)>2:
+        V_hat = Y.reshape((np.prod(dims[:2]),dims[2]),order='F')
+    else:
+        V_hat = Y.copy()
+    sns = []
+    for i in range(V_hat.shape[0]):
+        ff, Pxx = sp.signal.welch(V_hat[i,:],nperseg=min(256,dims[-1]))
+        ind1 = ff > range_ff[0]
+        ind2 = ff < range_ff[1]
+        ind = np.logical_and(ind1, ind2)
+        #Pls.append(Pxx)
+        #ffs.append(ff)
+        Pxx_ind = Pxx[ind]
+        sn = {
+            'mean': lambda Pxx_ind: np.sqrt(np.mean(np.divide(Pxx_ind, 2))),
+            'median': lambda Pxx_ind: np.sqrt(np.median(np.divide(Pxx_ind, 2))),
+            'logmexp': lambda Pxx_ind: np.sqrt(np.exp(np.mean(np.log(np.divide(Pxx_ind, 2)))))
+        }[method](Pxx_ind)
+        sns.append(sn)
+    sns = np.asarray(sns)
+    if len(dims)>2:
+        sns = sns.reshape(dims[:2],order='F')
+    return sns
+
 def fft_estimator(signal, freq_range=[0.25, 0.5], max_samples=3072):
     """
     High frequency components of FFT of the input signal
     ________
     Input:
         signals: (len_signal,) np.ndarray
-            Noise contaminated temporal signal 
+            Noise contaminated temporal signal
             (required)
         max_samples: positive integer
             Maximum number of samples which will be used in computing the
@@ -46,7 +75,6 @@ def fft_estimator(signal, freq_range=[0.25, 0.5], max_samples=3072):
     psdx[1:] *= 2
     return np.divide(psdx[idx[:psdx.shape[0]]], 2)
 
-
 def pwelch_estimator(signal, freq_range=[0.25, 0.5]):
     """
     High frequency components of Welch's PSD estimate of the input signal
@@ -80,10 +108,10 @@ def boot_estimator(signal, num_samples=1000, len_samples=25):
             Noise contaminated temporal signal
             (required)
         num_samples: positive integer
-            Number of bootstrap MSE estimates to average over 
+            Number of bootstrap MSE estimates to average over
             (default: 1000)
         len_samples: positive integer < len_signals
-            Length of subsamples used in bootstrap estimates 
+            Length of subsamples used in bootstrap estimates
            (default: 25)
     ________
     Output:
@@ -175,5 +203,111 @@ def estimate_noise(signals,
 
     # Compute & return estimate of standard deviations for each signal
     return np.sqrt([summarizer(estimator(signal)) for signal in signals])
+
+
+def get_noise_fft(Y, noise_range=[0.25, 0.5], noise_method='logmexp', max_num_samples_fft=3072,
+                  opencv=True):
+    """Estimate the noise level for each pixel by averaging the power spectral density.
+
+    Inputs:
+    -------
+
+    Y: np.ndarray
+
+    Input movie data with time in the last axis
+
+    noise_range: np.ndarray [2 x 1] between 0 and 0.5
+        Range of frequencies compared to Nyquist rate over which the power spectrum is averaged
+        default: [0.25,0.5]
+
+    noise method: string
+        method of averaging the noise.
+        Choices:
+            'mean': Mean
+            'median': Median
+            'logmexp': Exponential of the mean of the logarithm of PSD (default)
+
+    Output:
+    ------
+    sn: np.ndarray
+        Noise level for each pixel
+    """
+    if Y.ndim ==1:
+        Y = Y[np.newaxis,:]
+    #
+    T = Y.shape[-1]
+    # Y=np.array(Y,dtype=np.float64)
+
+    if T > max_num_samples_fft:
+        Y = np.concatenate((Y[..., 1:max_num_samples_fft // 3 + 1],
+                            Y[..., np.int(T // 2 - max_num_samples_fft / 3 / 2):np.int(T // 2 + max_num_samples_fft / 3 / 2)],
+                            Y[..., -max_num_samples_fft // 3:]), axis=-1)
+        T = np.shape(Y)[-1]
+
+    # we create a map of what is the noise on the FFT space
+    ff = np.arange(0, 0.5 + 1. / T, 1. / T)
+    ind1 = ff > noise_range[0]
+    ind2 = ff <= noise_range[1]
+    ind = np.logical_and(ind1, ind2)
+    # we compute the mean of the noise spectral density s
+    if Y.ndim > 1:
+        if opencv:
+            import cv2
+            psdx = []
+            for y in Y.reshape(-1, T):
+                dft = cv2.dft(y, flags=cv2.DFT_COMPLEX_OUTPUT).squeeze()[
+                    :len(ind)][ind]
+                psdx.append(np.sum(1. / T * dft * dft, 1))
+            psdx = np.reshape(psdx, Y.shape[:-1] + (-1,))
+        else:
+            xdft = np.fft.rfft(Y, axis=-1)
+            xdft = xdft[..., ind[:xdft.shape[-1]]]
+            psdx = 1. / T * abs(xdft)**2
+        psdx *= 2
+        sn = mean_psd(psdx, method=noise_method)
+
+    else:
+        xdft = np.fliplr(np.fft.rfft(Y))
+        psdx = 1. / T * (xdft**2)
+        psdx[1:] *= 2
+        sn = mean_psd(psdx[ind[:psdx.shape[0]]], method=noise_method)
+
+    return sn, psdx
+
+def mean_psd(y, method='logmexp'):
+    """
+    Averaging the PSD
+
+    Parameters:
+    ----------
+
+        y: np.ndarray
+             PSD values
+
+        method: string
+            method of averaging the noise.
+            Choices:
+             'mean': Mean
+             'median': Median
+             'logmexp': Exponential of the mean of the logarithm of PSD (default)
+
+    Returns:
+    -------
+        mp: array
+            mean psd
+    """
+
+    if method == 'mean':
+        mp = np.sqrt(np.mean(np.divide(y, 2), axis=-1))
+    elif method == 'median':
+        mp = np.sqrt(np.median(np.divide(y, 2), axis=-1))
+    else:
+        mp = np.log(np.divide((y + 1e-10), 2))
+        mp = np.mean(mp, axis=-1)
+        mp = np.exp(mp)
+        mp = np.sqrt(mp)
+
+    return mp
+
 
 

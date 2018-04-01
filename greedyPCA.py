@@ -1,29 +1,42 @@
+import numpy
 import numpy as np
 import scipy as sp
+
 from scipy.stats import norm
-
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-
 from sklearn.utils.extmath import randomized_svd
-import matplotlib.pyplot as plt
-
-import spatial_filtering as sp_filters
-import tools as tools
-
-
 from sklearn import preprocessing
-import cvxpy as cp
-import time
 
 import concurrent
+import cvxpy as cp
 import multiprocessing
 import itertools
 import time
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.pyplot as plt
+
+# see how this changes with get_noise_fft
+#import spatial_filtering as sp_filters
+
 import trefide
 import util_plot as uplot
 import tools as tools_
+import noise_estimator
+from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf
 
+# cython
+
+def kurto_one(x):
+    """
+    Computer kurtosis of rows of x with 2D (d x T)
+    Outputs: idx of components with kurtosis > population mean + std
+    """
+    # Compute kurtosis
+    kurt = sp.stats.kurtosis(x, axis=1, fisher=True, bias=True)
+    # keep component wrt mean + std
+    kurt_th = kurt.mean() + kurt.std()
+    keep = np.where(kurt > kurt_th)[0].tolist()
+    return keep
 
 def stimulus_segmentation(T,
                           stim_knots=None,
@@ -69,7 +82,11 @@ def mean_confidence_interval(data,
     """
     if one_sided:
         confidence = 1 - 2*(confidence-1)
-    _, th = sp.stats.norm.interval(confidence,loc =np.mean(data),scale=data.std())
+
+    _, th = sp.stats.norm.interval(confidence,
+                                loc =np.mean(data),
+                                scale=data.std())
+
     return th
 
 
@@ -81,7 +98,8 @@ def choose_rank(Vt,
                 kurto=False,
                 mean_th=None,
                 mean_th_factor=1.,
-                min_rank=0):
+                min_rank=0,
+               enforce_both=False):
     """
     Select rank vectors in Vt which pass test statistic(s) enabled
     (e.g. axcov and/or kurtosis)
@@ -103,10 +121,12 @@ def choose_rank(Vt,
     kurto:      boolean
                 flag to include components which pass kurtosis null hypothesis
     mean_th:    float
-                threshold employed to reject components according to correlation null hypothesis
+                threshold employed to reject components according to
+                correlation null hypothesis
     mean_th_factor: float
                 factor to scale mean_th
-                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+                typically set to 2 if greedy=True and mean_th=None or
+                if mean_th has not been scaled yet.
     min_rank:   int
                 minimum number of components to include in output
                 even if no components of Vt pass any test
@@ -120,6 +140,10 @@ def choose_rank(Vt,
                 can vary according to min_rank
 
     """
+    if enforce_both:
+        corr= True
+        kurto = True
+
     n, L = Vt.shape
     vtid = np.zeros(shape=(3, n)) * np.nan
 
@@ -128,7 +152,11 @@ def choose_rank(Vt,
         if mean_th is None:
             mean_th = wnoise_acov_CI(L,confidence=confidence,maxlag=maxlag)
         mean_th*= mean_th_factor
-        keep1 = vector_acov(Vt, mean_th = mean_th, maxlag=maxlag, iterate=iterate,min_rank=min_rank)
+        keep1 = vector_acov(Vt,
+                            mean_th = mean_th,
+                            maxlag=maxlag,
+                            iterate=iterate,
+                            min_rank=min_rank)
     else:
         keep1 = []
     if kurto is True:
@@ -139,6 +167,13 @@ def choose_rank(Vt,
     keep = list(set(keep1 + keep2))
     loose = np.setdiff1d(np.arange(n),keep)
     loose = list(loose)
+
+    if enforce_both:
+        keep1 = np.intersect1d(keep1,keep2)
+        keep2 = keep1
+        print(len(keep1))
+
+
     vtid[0, keep1] = 1  # components stored due to cov
     vtid[1, keep2] = 1  # components stored due to kurto
     vtid[2, loose] = 1  # extra components ignored
@@ -164,8 +199,8 @@ def wnoise_acov_CI(L,
     confidence: float
                 confidence level for test statistic
     maxlag:     int
-                max correlation lag for correlation null hypothesis in samples
-                (e.g. indicator decay in samples)
+                max correlation lag for correlation null hypothesis
+                in samples (e.g. indicator decay in samples)
     n:          int
                 number of standard normal vectors to generate
 
@@ -177,17 +212,20 @@ def wnoise_acov_CI(L,
     mean_th:    float
                 value of mean of ACFs of each standard normal vector at CI.
     """
+
     # th1 = 0
     #print 'confidence is {}'.format(confidence)
     covs_ht = np.zeros(shape=(n,))
     for sample in np.arange(n):
         ht_data = np.random.randn(L)
-        covdata = tools_.axcov(ht_data, maxlag)[maxlag:]/ht_data.var()
+        covdata = tools_.axcov(ht_data,
+                            maxlag)[maxlag:]/ht_data.var()
+
         covs_ht[sample] = covdata.mean()
         #covs_ht[sample] = np.abs(covdata[1:]).mean()
     #hist, _,_=plt.hist(covs_ht)
     #plt.show()
-    mean_th = mean_confidence_interval(covs_ht, confidence)
+    mean_th = mean_confidence_interval(covs_ht,confidence)
     #print('th is {}'.format(mean_th))
     return mean_th
 
@@ -229,6 +267,7 @@ def vector_acov(Vt,
                 includes indices of components which passed the null hypothesis
                 and/or additional components added given parameters
     """
+
     keep = []
     num_components = Vt.shape[0]
     print('mean_th is %s'%mean_th) if verbose else 0
@@ -236,9 +275,13 @@ def vector_acov(Vt,
         # standarize and normalize
         vi = Vt[vector, :]
         vi =(vi - vi.mean())/vi.std()
-        print('vi mean = %.3f var = %.3f'%(vi.mean(),vi.var())) if verbose else 0
-        vi_cov = tools_.axcov(vi, maxlag)[maxlag:]/vi.var()
-        print(vi_cov.mean()) if verbose else 0
+
+        print('vi ~ (mean: %.3f,var:%.3f)'%(vi.mean(),
+                                            vi.var())) if verbose else 0
+
+        vi_cov = tools_.axcov(vi,
+                            maxlag)[maxlag:]/vi.var()
+
         if vi_cov.mean() < mean_th:
             if iterate is True:
                 break
@@ -246,7 +289,9 @@ def vector_acov(Vt,
             keep.append(vector)
     # Store extra components
     if vector < num_components and extra != 1:
-        extra = min(vector*extra,Vt.shape[0])
+        extra = min(vector*extra,
+                    Vt.shape[0])
+
         for addv in range(1, extra-vector+ 1):
             keep.append(vector + addv)
     # Forcing one components
@@ -258,8 +303,11 @@ def vector_acov(Vt,
 
 
 def compute_svd(M,
-                method='randomized',
-                n_components=400):
+                method='vanilla',
+                n_components=2,
+                n_iter=7,
+                random_state=None,
+               reconstruct=False):
     """
     Decompose array M given parameters.
     asumme M has been mean_subtracted
@@ -291,10 +339,16 @@ def compute_svd(M,
     """
 
     if method == 'vanilla':
-        U, s, Vt = np.linalg.svd(M, full_matrices=False)
+        U, s, Vt = numpy.linalg.svd(M, full_matrices=False)
+
     elif method == 'randomized':
-        U, s, Vt = randomized_svd(M, n_components=n_components,
-                n_iter=7, random_state=None)
+        U, s, Vt = randomized_svd(M,
+                                n_components=n_components,
+                                n_iter=n_iter,
+                                random_state=random_state)
+
+    if reconstruct:
+        return U.dot(np.diag(s).dot(Vt))
     return U, s, Vt
 
 
@@ -327,6 +381,7 @@ def spatial_decimation(data,
                        dims,
                        ds=1):
     """
+
     Decimate data by ds
     smaller frame is mean of decimated frames
 
@@ -348,12 +403,11 @@ def spatial_decimation(data,
                 spatially decimated array given data
     """
 
-    #data0 = data.reshape(len(data0), dims[1] / ds[0], ds[0], dims[2] / ds[1], ds[1]).mean(2).mean(3)
+    #data0 = data.reshape(len(data0), dims[1]
+    # / ds[0], ds[0], dims[2] / ds[1], ds[1]).mean(2).mean(3)
     data0  = data.copy()
     return data0
 
-
-##################
 
 def denoise_patch(M,
                   maxlag=5,
@@ -412,17 +466,19 @@ def denoise_patch(M,
                 typically set to 1 to avoid empty output (array of zeros)
                 if input array is mostly noise.
     greedy:     boolean
-                flag to greedily update spatial and temporal components (estimated with PCA)
-                greedyly by denoising temporal and spatial components
+                flag to greedily update spatial and temporal components
+                (estimated with PCA) greedily by denoising
+                temporal and spatial components
     mean_th_factor: float
                 factor to scale mean_th
-                typically set to 2 if greedy=True and mean_th=None or if mean_th has not been scaled yet.
+                typically set to 2 if greedy=True and mean_th=None
+                or if mean_th has not been scaled yet.
     share_th:   boolean
                 flag to compute a unique thredhold for correlation null hypothesis
                 to be used in each tile.
                 If false: each tile calculates its own mean_th value.
     fudge_factor: float
-                constant to scale estimated noise std st denoising st denoising is less
+                constant to scale estimated noise std st denoising is less
                 (lower factor) or more (higher factor) restrictive.
     U_update:   boolean
                 flag to (not) update spatial components by imposing L1- constraint.
@@ -445,8 +501,11 @@ def denoise_patch(M,
                 sum of the ranks of all tiles
     """
     dimsM = M.shape
+    M = M.reshape((np.prod(dimsM[:2]),dimsM[2]),order='F')
+
+    #print('greedy here 505')
     start = time.time()
-    Yd, vtids = denoise_components(M.reshape((np.prod(dimsM[:2]),dimsM[2]),order='F'),
+    Yd, vtids = denoise_components(M,
                                    maxlag=maxlag,
                                    tsub=tsub,
                                    noise_norm=noise_norm,
@@ -469,8 +528,18 @@ def denoise_patch(M,
                                    stim_knots=stim_knots,
                                    stim_delta=stim_delta
                                   )
-    Yd = Yd.reshape(dimsM, order='F')
 
+    Yd = Yd.reshape(dimsM, order='F')
+    # determine individual rank
+    rlen = total_rank(vtids)
+
+    print('\trank:%d\trun_time: %f'%(rlen,time.time()-start))
+    return Yd, rlen
+
+
+def total_rank(vtids,
+            verbose=False):
+    # determine individual rank
     case1 = ~np.isnan(vtids[0,:])
     if vtids[0,case1].sum()>0:
         ranks = case1
@@ -478,12 +547,10 @@ def denoise_patch(M,
         ranks = np.nan
     #ranks = np.where(np.logical_or(vtids[0, :] >= 1, vtids[1, :] == 1))[0]
     if np.all(ranks == np.nan):
-        print('M rank Empty')
         rlen = 0
     else:
         rlen = vtids[0,ranks].sum() #len(ranks)
-        print('\tM\trank: %d\trun_time: %f'%(rlen,time.time()-start))
-    return Yd, rlen
+    return rlen
 
 
 def greedy_spatial_denoiser(Y,
@@ -531,7 +598,8 @@ def greedy_temporal_denoiser(V_hat,
 
     else:
         diff = trefide.difference_operator(num_components)
-        noise_std_ = sp_filters.noise_estimator(V_hat,method='logmexp')
+        #noise_std_ = sp_filters.noise_estimator(V_hat,method='logmexp')
+        noise_std_ = noise_estimator.get_noise_fft(V_hat)[0]
         noise_std_ *= fudge_factor
 
         print('Noise range is %.3e %.3e'%(min(noise_std_),
@@ -618,8 +686,7 @@ def iterative_temporal_denoiser(Y,
                                                     lagrange_scaled=lagrange_scaled)
             else:
                 # deprecated
-                noise_std_ = sp_filters.noise_estimator(V_[np.newaxis,:],
-                        method='logmexp')
+                noise_std_ = noise_estimator.get_noise_fft(V_[np.newaxis,:])[0]
                 if fudge_factor is not None:
                     noise_std_ *=fudge_factor
 
@@ -628,6 +695,7 @@ def iterative_temporal_denoiser(Y,
                         (min(noise_std_),max(noise_std_))) if verbose else 0
 
                 V_2 = c_l1tf_v_hat(V_, noise_std_)[0]
+
         else:
             if isinstance(lambdas_,int) or isinstance(lambdas_,float):
                 V_2 = c_update_V(V_, lambdas_/norm_U[ii])
@@ -691,7 +759,7 @@ def greedy_component_denoiser(Y,
                               U_update=False,
                               pca_method='vanilla',
                               final_regression=True,
-                              max_num_iters=10,
+                              max_num_iters=20,
                               max_num_components=20,
                               solver='SCS',
                               constraint_segmented=False, # call trefide
@@ -758,6 +826,8 @@ def greedy_component_denoiser(Y,
                 k1 is the updated estimated rank of Y
                 k1 >= k depending on additional structured components added from residual.
     """
+
+    #mean_th = mean_th+0.05
     num_components, T = V_hat.shape
 
     uplot.plot_temporal_traces(V_hat) if plot_en else 0
@@ -803,6 +873,7 @@ def greedy_component_denoiser(Y,
                                               plot_en=plot_en)
 
         lambdas_ = lambdas_ * (U_hat**2).sum(axis=0)
+
         uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
 
         print('Iteration %d: begin greedy loops'%(iteration)) if verbose else 0
@@ -902,8 +973,7 @@ def greedy_component_denoiser(Y,
     ### Final update
     ##################
 
-    print('Final update, totaliterations %d'%iteration) if verbose else 0
-
+    print('Final update after %d iterations %d'%iteration) if verbose else 0
     print('\tFinal update of temporal components') if verbose else 0
     V_TF = iterative_temporal_denoiser(Y,
                                        U_hat,
@@ -1071,7 +1141,13 @@ def denoise_components(data_all,
         #data0 = spatial_decimation(data0, ds, dims)
         data0 = data0.copy()
     # Run svd
-    U, s, Vt = compute_svd(data0.T, method=pca_method)
+
+    start = time.time()
+    #print(data0.shape)
+    #print('Begin svd')
+    U, s, Vt = compute_svd(data0.T,
+                            method=pca_method)
+    #print('svd run for %f'%(time.time()-start))
 
     # Project back if temporally filtered or downsampled
     if tfilt or tsub > 1:
@@ -1082,6 +1158,8 @@ def denoise_components(data_all,
         mean_th_factor = 2.
 
     # Select components
+    #start = time.time()
+
     if mean_th is None:
         mean_th = wnoise_acov_CI(Vt.shape[1],
                                  confidence=confidence,
@@ -1102,6 +1180,8 @@ def denoise_components(data_all,
 
     keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
 
+    #print('select run for %f'%(time.time()-start))
+
     # Plot temporal correlations
     uplot.plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
 
@@ -1119,10 +1199,11 @@ def denoise_components(data_all,
         return Yd, ctid
 
     Vt = Vt[keep1,:]
+    #print('here 1191')
 
     # Denoise each temporal component
     if tfide:
-        noise_levels = sp_filters.noise_estimator(Vt)
+        noise_levels = noise_estimator.get_noise_fft(Vt)[0]
         Vt = trefide.denoise(Vt, stdvs = noise_levels)
 
     if tfide and (tfilt or tsub > 1):
@@ -1154,7 +1235,9 @@ def denoise_components(data_all,
             print('\tERROR: Greedy solving failed, keeping %d parameters'%
                     (len(keep1)))
             ctid[0,0] = 100
+
     Yd = U.dot(Vt) + mu.T
+
     if broken_idx.sum() > 0:
         print('ERROR: There are %d broken pixels.'%(broken_idx.sum()))
         Yd_out = np.ones(shape=data_all.shape).T*np.inf
@@ -1164,9 +1247,11 @@ def denoise_components(data_all,
 
     return Yd_out, ctid
 
+
 #########################################################################################
 ## DURING MERGING PHASE
 #########################################################################################
+
 
 def c_l1tf_v_hat(v,
                  sigma,
@@ -1204,6 +1289,7 @@ def c_l1tf_v_hat(v,
 
     return np.asarray(v_hat.value).flatten(), lambda_
 
+
 def c_l1_u_hat(y,
                V_TF,
                fudge_factor=1,
@@ -1233,7 +1319,104 @@ def c_l1_u_hat(y,
         return np.asarray(u_hat.value).flatten(), 1/constraints[0].dual_value
 
 
+def l1tf_dual(v,
+              lambda_=1.0,
+               solver='cython',
+               cvxpy_solver='SCS',
+               max_iters=1000,
+               verbose=False,
+               max_lambda=False,
+               rescale=1
+                  ):
+    """
+    Solve with either of these solvers
+
+    """
+    if solver == 'cython':
+        x_hat = l1_tf(y,
+                    lambda_,
+                    max_lambda,
+                    max_iters,
+                    1)
+
+    elif solver =='cvxpy':
+        T = len(v)
+        diff = trefide.difference_operator(T)
+        print(lambda_) if verbose else 0
+        v_hat = cp.Variable(T)
+        cte2 = lambda_*cp.norm(diff*v_hat,1)
+        objective = cp.Minimize(cp.norm(v-v_hat,2)**2 + cte2)
+
+        cp.Problem(objective).solve(solver=cvxpy_solver,
+                                    max_iters=max_iters,
+                                    verbose=False)
+
+        v_hat = np.asarray(v_hat.value).flatten()
+
+    elif solver == 'g_or':
+        pass
+
+    return v_hat
+
+
 def c_update_V(v,
+                lambda_,
+                region_indices=None,
+                verbose=False,
+                plot_en=False,
+                solver='SCS',
+                max_iters=1000,
+               max_lambda=False):
+    """
+    merging in progress
+    min ||Y-UV||_2^2 + sum_i lambda_i||D^2V_i||_1
+    # Fixing U we have
+    min ||v-v_hat||_2^2 + lambda_i||D^2V_i||_1
+    """
+    T = len(v)
+    diff = trefide.difference_operator(T)
+    print(lambda_) if verbose else 0
+
+    if isinstance(lambda_,int) or isinstance(lambda_,float):
+        print('1255') if verbose else 0
+        v_hat = l1tf_dual(v,
+                      lambda_=lambda_,
+                      cvxpy_solver=solver,
+                      max_iters=max_iters,
+                      max_lambda=max_lambda,
+                      verbose=verbose)
+        return v_hat
+
+    if region_indices is None:
+        # deprecated- editing merge
+        print('1267') if verbose else 0
+        v_hat = l1tf_dual(v,
+                      lambda_=lambda_,
+                      cvxpy_solver=solver,
+                      max_iters=max_iters,
+                      max_lambda=max_lambda,
+                      verbose=verbose)
+        return v_final
+
+    print('1092') if verbose else 0
+    v_final = np.zeros(len(v))
+    for ii, region_ in enumerate(region_indices):
+        print('Denoising component %d'%ii) if verbose else 0
+        v_ = v[region_.flatten()]
+        v_hat = l1tf_dual(v_,
+              lambda_=lambda_[ii],
+              cvxpy_solver=solver,
+              max_iters=max_iters,
+              max_lambda=max_lambda,
+              verbose=verbose)
+
+        v_final[region_.flatten()]=v_hat
+        uplot.plot_temporal_traces(v_hat[:,np.newaxis].T,
+                                   v_[:,np.newaxis].T) if plot_en else 0
+    return v_final
+
+
+def c_update_V_deprecated(v,
                 lambda_,
                 region_indices=None,
                 verbose=False,
@@ -1241,7 +1424,7 @@ def c_update_V(v,
                 solver='SCS',
                 max_iters=1000):
     """
-    merging in progress
+    DEPRECATED ---
     min ||Y-UV||_2^2 + sum_i lambda_i||D^2V_i||_1
     # Fixing U we have
     min ||v-v_hat||_2^2 + lambda_i||D^2V_i||_1
