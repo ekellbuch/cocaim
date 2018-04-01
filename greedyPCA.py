@@ -22,9 +22,7 @@ import trefide
 import util_plot as uplot
 import tools as tools_
 import noise_estimator
-from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf
-
-# cython
+from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 def kurto_one(x):
     """
@@ -142,7 +140,7 @@ def choose_rank(Vt,
     """
     if enforce_both:
         corr= True
-        kurto = True
+        #kurto = True
 
     n, L = Vt.shape
     vtid = np.zeros(shape=(3, n)) * np.nan
@@ -1323,7 +1321,7 @@ def l1tf_dual(v,
               lambda_=1.0,
                solver='cython',
                cvxpy_solver='SCS',
-               max_iters=1000,
+               max_iters=400,
                verbose=False,
                max_lambda=False,
                rescale=1
