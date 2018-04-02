@@ -5,6 +5,7 @@ import scipy as sp
 from scipy.stats import norm
 from sklearn.utils.extmath import randomized_svd
 from sklearn import preprocessing
+from skimage.transform import downscale_local_mean
 
 import concurrent
 import cvxpy as cp
@@ -376,16 +377,15 @@ def temporal_decimation(data,
 
 
 def spatial_decimation(data,
-                       dims,
-                       ds=1):
+                       ds=1,
+                       dims=None):
     """
 
-    Decimate data by ds
-    smaller frame is mean of decimated frames
-
+    Decimate data spatially by ds
+    pixel is avg of ds pixels
     Parameters:
     ----------
-    data:       np.array (T x d)
+    data:       np.array (T x d) or (d1x d2 x T)
                 array to be decimated wrt second axis
 
     ds:         int
@@ -403,8 +403,19 @@ def spatial_decimation(data,
 
     #data0 = data.reshape(len(data0), dims[1]
     # / ds[0], ds[0], dims[2] / ds[1], ds[1]).mean(2).mean(3)
-    data0  = data.copy()
-    return data0
+    #data0  = data.copy()
+    if ds ==1:
+        return data
+
+    ndim = np.ndim(data)
+    if ndim <3:
+        data0 = (data.T).reshape(dims,order='F') # d1 x d2 x T
+    data_0 = downscale_local_mean(data0,
+                                (ds,ds,1)) # d1//ds x d2//ds x T
+    if ndim<3:
+        dims_ = data_0.shape
+        data_0 = data_0.reshape((np.prod(dims_[:2]),dims_[2]), order='F').T
+    return data_0
 
 
 def denoise_patch(M,
@@ -499,7 +510,7 @@ def denoise_patch(M,
                 sum of the ranks of all tiles
     """
     dimsM = M.shape
-    M = M.reshape((np.prod(dimsM[:2]),dimsM[2]),order='F')
+    M = M.reshape((np.prod(dimsM[:2]), dimsM[2]), order='F')
 
     #print('greedy here 505')
     start = time.time()
@@ -531,12 +542,13 @@ def denoise_patch(M,
     # determine individual rank
     rlen = total_rank(vtids)
 
-    print('\trank:%d\trun_time: %f'%(rlen,time.time()-start))
+    print('\tY rank:%d\trun_time: %f'%(rlen,time.time()-start))
+
     return Yd, rlen
 
 
 def total_rank(vtids,
-            verbose=False):
+                verbose=False):
     # determine individual rank
     case1 = ~np.isnan(vtids[0,:])
     if vtids[0,case1].sum()>0:
@@ -566,7 +578,8 @@ def greedy_spatial_denoiser(Y,
         U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
     else:
         nus_= np.zeros((V_TF.shape[0]))
-        U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))))
+        U_hat = np.matmul(Y, np.matmul(V_TF.T,
+                                        np.linalg.inv(np.matmul(V_TF, V_TF.T))))
     return U_hat, nus_
 
 
@@ -937,19 +950,17 @@ def greedy_component_denoiser(Y,
         U_r, s_r, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'),
                                      method=pca_method)
 
-        ignore_frames =stimulus_segmentation(Vt_r.shape[1],
-                                           stim_knots=stim_knots,
-                                           stim_delta=stim_delta)
-
-        ctid = choose_rank(Vt_r[:,~ignore_frames],
-                           maxlag=maxlag,
-                           confidence=confidence,
-                           corr=corr,
-                           kurto=kurto,
-                           mean_th=mean_th)
-
-        keep1_r = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-        uplot.plot_vt_cov(Vt_r,keep1_r,maxlag) if plot_en else 0
+        keep1_r = find_temporal_component(Vt_r,
+                                        confidence=confidence,
+                                        corr=corr,
+                                        iterate=iterate,
+                                        kurto=kurto,
+                                        maxlag=maxlag,
+                                        mean_th=mean_th,
+                                        plot_en=plot_en,
+                                        stim_knots=stim_knots,
+                                        stim_delta=stim_delta
+                                        )
 
         if len(keep1_r)==0:
             print('Final number of components %d'%V_TF.shape[0]) if verbose else 0
@@ -971,8 +982,9 @@ def greedy_component_denoiser(Y,
     ### Final update
     ##################
 
-    print('Final update after %d iterations %d'%iteration) if verbose else 0
+    print('*Final update after %d iterations'%iteration) if verbose else 0
     print('\tFinal update of temporal components') if verbose else 0
+
     V_TF = iterative_temporal_denoiser(Y,
                                        U_hat,
                                        V_TF,
@@ -999,6 +1011,102 @@ def greedy_component_denoiser(Y,
     uplot.plot_temporal_traces(V_TF_i,V_TF) if plot_en else 0
     # this needs to be updated to reflect any new rank due to new numb of iterations
     return U_hat , V_TF_i
+
+
+def find_temporal_component(Vt,
+                            confidence=0.99,
+                            corr=True,
+                            iterate=False,
+                            kurto=False,
+                            maxlag=5,
+                            mean_th=None,
+                            mean_th_factor=1,
+                            plot_en=False,
+                            stim_knots=None,
+                            stim_delta=200):
+    """
+    """
+    if mean_th is None:
+        mean_th = wnoise_acov_CI(Vt.shape[1],
+                                 confidence=confidence,
+                                 maxlag=maxlag)
+    mean_th *= mean_th_factor
+
+    ignore_segments =stimulus_segmentation(Vt.shape[1],
+                                           stim_knots=stim_knots,
+                                           stim_delta=stim_delta
+                                          )
+
+    ctid = choose_rank(Vt[:,~ignore_segments],
+                       maxlag=maxlag,
+                       iterate=iterate,
+                       confidence=confidence,
+                       corr=corr,
+                       kurto=kurto,
+                       mean_th=mean_th)
+
+    keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
+
+    if plot_en:    # Plot temporal correlations
+        uplot.plot_vt_cov(Vt,keep1,maxlag)
+    return keep1
+
+
+def decimation_interpolation(data,
+                            dims=None,
+                            ds=1,
+                            tsub=1,
+                            rank=2
+                            ):
+    """
+    data = d1 x d2 x T
+    this data has already been spatially decimated
+    ds is to upsample up
+    ds: spatial decimation
+    tsub: temporal decimation
+    """
+    # data = data0.T (pxT)
+    # Run rank-k svd on spatially and temporall decimated Y
+    # spatially decimate
+    # temporally decimate
+    # run rank k
+    data_tsd = temporal_decimation(data.T, tsub)
+
+    U, s, Vt = compute_svd(data_tsd.T,
+                            n_components=rank,
+                            method='randomized')
+    U = U.dot(np.diag(s))
+    ndims_=dims[0]//ds, dims[1]//ds, dims[2]
+
+    # Then upsample the resulting decimated U and V to initialize U and V
+    # upsample temporal
+    x_interp = np.linspace(0,dims[2],dims[2])
+    xp_ = x_interp[::tsub]
+    Vt_interp = np.zeros((rank,dims[2]))
+    for comp_ in range(rank):
+        Vt_interp[comp_,:] = np.interp(x_interp,xp_,Vt[comp_,:])
+
+    # upsample spatial
+    U_ds = U.reshape(ndims_[:2] + (-1,), order = 'F')
+    U_ds = sp.ndimage.zoom(U_ds, (dims[0], dims[1], 1 ))
+
+    return U_ds, Vt_interp
+
+
+def temporal_filter_ar(data,
+                        p=1):
+    """
+    """
+    data0 = np.zeros(data.shape)
+    #T, num_pxls = data.shape
+    for ii, trace in enumerate(data.T):
+        # Estimate tau for exponential
+        tau = cnmf.deconvolution.estimate_time_constant(
+                trace,p=p,sn=None,lags=5,fudge_factor=1.)
+        window = tau **range(0,100)
+        data0[:,ii] = np.convolve(trace,window,mode='full')[:T]/np.sum(window)
+
+    return data0
 
 
 def denoise_components(data_all,
@@ -1094,8 +1202,10 @@ def denoise_components(data_all,
                 a given component passed and thus it is included.
                 If greedy=True, all components added are included as corr components.
     """
+
+    decimation_flag = False
     if data_all.ndim == 3:
-        dims = data_all.shape
+        dims = data_all.shape # d1 x d2 x T
         data_all = data_all.reshape((np.prod(dims[:2]),dims[2]), order='F')
     data_all = data_all.T.astype('float32')
     # In a 2d matrix, we get rid of any broke (inf) pixels
@@ -1107,83 +1217,55 @@ def denoise_components(data_all,
         data = data_all[:, ~broken_idx]
     else:
         data = data_all.copy()
-
     # Remove the mean
     mu = data.mean(0, keepdims=True)
     data = data - mu
 
     # temporally filter the data
-    if tfilt:
-        print('Apply exponential filter') if verbose else 0
-        data0 = np.zeros(data.shape)
-        #T, num_pxls = data.shape
-        for ii, trace in enumerate(data.T):
-            # Estimate tau for exponential
-            tau = cnmf.deconvolution.estimate_time_constant(
-                    trace,p=p,sn=None,lags=5,fudge_factor=1.)
-            window = tau **range(0,100)
-            data0[:,ii] = np.convolve(fluor,window,mode='full')[:T]/np.sum(window)
-    else:
-        data0 = data.copy()
+    #if tfilt:
+    #    print('Apply exponential filter') if verbose else 0
+    #    data0 = temporal_filter_ar(data,p=p)
+    #else:
+    #    data0 = data.copy()
 
     # temporally decimate the data
-    if tsub > 1:
-        print('Temporal decimation %d'%tsub) if verbose else 0
-        data0 = temporal_decimation(data0, tsub)
+    #if tsub > 1:
+    #    print('Temporal decimation %d'%tsub) if verbose else 0
+    #    data0 = temporal_decimation(data0, tsub)
 
     # spatially decimate the data
     if ds > 1:
-        print('Spatial decimation %d'%ds) if verbose else 0
-        #D = len(dims)
-        #ds = np.ones(D-1).astype('uint8')
-        #data0 = spatial_decimation(data0, ds, dims)
-        data0 = data0.copy()
-    # Run svd
+        print('Spatial decimation by %d'%ds) if verbose else 0
+        data0 = spatial_decimation(data0,
+                                ds=ds,
+                                dims=dims)
 
-    start = time.time()
-    #print(data0.shape)
-    #print('Begin svd')
     U, s, Vt = compute_svd(data0.T,
                             method=pca_method)
-    #print('svd run for %f'%(time.time()-start))
 
     # Project back if temporally filtered or downsampled
-    if tfilt or tsub > 1:
-        Vt = U.T.dot(data.T)
+    #if tfilt or tsub > 1:
+    #    Vt = U.T.dot(data.T)
 
     # if greedy Force x2 mean_th (store only big components)
     if greedy and (mean_th_factor <= 1.):
         mean_th_factor = 2.
 
     # Select components
-    #start = time.time()
+    keep1 = find_temporal_component(Vt,
+                                    confidence=confidence,
+                                    corr=corr,
+                                    iterate=iterate,
+                                    kurto=kurto,
+                                    maxlag=maxlag,
+                                    mean_th=mean_th,
+                                    mean_th_factor=mean_th_factor,
+                                    plot_en=plot_en,
+                                    stim_knots=stim_knots,
+                                    stim_delta=stim_delta
+                                    )
 
-    if mean_th is None:
-        mean_th = wnoise_acov_CI(Vt.shape[1],
-                                 confidence=confidence,
-                                 maxlag=maxlag)
-        mean_th *= mean_th_factor
-
-    ignore_segments =stimulus_segmentation(Vt.shape[1],
-                                           stim_knots=stim_knots,
-                                           stim_delta=stim_delta
-                                          )
-    ctid = choose_rank(Vt[:,~ignore_segments],
-                       maxlag=maxlag,
-                       iterate=iterate,
-                       confidence=confidence,
-                       corr=corr,
-                       kurto=kurto,
-                       mean_th=mean_th)
-
-    keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-
-    #print('select run for %f'%(time.time()-start))
-
-    # Plot temporal correlations
-    uplot.plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
-
-    # If no components to store, return min rank
+    # If no components to store, exit & return min rank
     if np.all(keep1 == np.nan):
         if min_rank == 0:
             Yd = np.zeros(data.T.shape)
@@ -1196,18 +1278,24 @@ def denoise_components(data_all,
         Yd += mu.T
         return Yd, ctid
 
-    Vt = Vt[keep1,:]
-    #print('here 1191')
-
-    # Denoise each temporal component
-    if tfide:
-        noise_levels = noise_estimator.get_noise_fft(Vt)[0]
-        Vt = trefide.denoise(Vt, stdvs = noise_levels)
-
-    if tfide and (tfilt or tsub > 1):
-        U = data.T.dot(np.linalg.pinv(Vt).T)
+    if decimation_flag:
+        U, Vt = decimation_interpolation(data0.T,
+                                        ds=ds,
+                                        tsub=tsub,
+                                        rank=len(keep1)
+                                        )
     else:
-        U = U[:,keep1].dot(np.eye(len(keep1))*s[keep1.astype(int)])
+        # Select components
+        Vt = Vt[keep1,:]
+        # Denoise each temporal component
+        if tfide:
+            noise_levels = noise_estimator.get_noise_fft(Vt)[0]
+            Vt = trefide.denoise(Vt, stdvs = noise_levels)
+
+        if tfide and (tfilt or tsub > 1):
+            U = data.T.dot(np.linalg.pinv(Vt).T)
+        else:
+            U = U[:,keep1].dot(np.eye(len(keep1))*s[keep1.astype(int)])
 
     # call greedy
     if greedy:
