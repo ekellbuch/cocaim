@@ -92,11 +92,9 @@ def spatial_filter_block(data,
     Cy = covariance_matrix(data_r)
     try:
         if neuron_indx is None:
-            #hat_k = np.linalg.inv(Cy).dot(Cy-D)
-            hat_k = np.linalg.lstsq(Cy,Cy-D)[0]
+            hat_k = np.linalg.inv(Cy).dot(Cy-D)
         else:
-            #hat_k = np.linalg.inv(Cy).dot(Cy[neuron_indx,:]-D[neuron_indx,:])
-            hat_k = np.linalg.lstsq(Cy,Cy[neuron_indx,:]-D[neuron_indx,:])[0]
+            hat_k = np.linalg.inv(Cy).dot(Cy[neuron_indx,:]-D[neuron_indx,:])
     except np.linalg.linalg.LinAlgError as err:
         print('Singular matrix(?) bye bye')
         return data , []
