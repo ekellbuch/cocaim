@@ -259,6 +259,7 @@ def denoise_dx_tiles(W,
                      mean_th_factor=1.15,
                      U_update=False,
                      min_rank=1,
+                     verbose=False,
                      stim_knots=None,
                      stim_delta=200):
 
@@ -281,6 +282,7 @@ def denoise_dx_tiles(W,
                              fudge_factor=fudge_factor,
                              mean_th_factor=mean_th_factor,
                              U_update=U_update,
+                             verbose=verbose,
                              min_rank=min_rank)
 
     dims_ = list(map(np.shape,dW_))
@@ -306,6 +308,7 @@ def denoise_dx_tiles(W,
                                  fudge_factor=fudge_factor,
                                  mean_th_factor=mean_th_factor,
                                  U_update=U_update,
+                                 verbose=verbose,
                                  min_rank=min_rank)
 
     dims_rs = list(map(np.shape,dW_rs))
@@ -324,6 +327,7 @@ def denoise_dx_tiles(W,
                                  fudge_factor=fudge_factor,
                                  mean_th_factor=mean_th_factor,
                                  U_update=U_update,
+                                 verbose=verbose,
                                  min_rank=min_rank)
 
     dims_cs = list(map(np.shape,dW_cs))
@@ -342,6 +346,7 @@ def denoise_dx_tiles(W,
                              confidence=confidence,
                              fudge_factor=fudge_factor,
                              mean_th_factor=mean_th_factor,
+                             verbose=verbose,
                              U_update=U_update,
                              min_rank=min_rank)
 
@@ -457,6 +462,7 @@ def run_single(Y,
                mean_th_factor=1.15,
                U_update=False,
                min_rank=1,
+               verbose=False,
                stim_knots=None,
                stim_delta=200):
     """
@@ -496,6 +502,7 @@ def run_single(Y,
                                       fudge_factor=fudge_factor,
                                       mean_th_factor=mean_th_factor,
                                       U_update=U_update,
+                                      verbose=verbose,
                                       min_rank=min_rank,
                                       stim_knots=stim_knots,
                                       stim_delta=stim_delta),
@@ -517,6 +524,7 @@ def run_single(Y,
                                   mean_th_factor=mean_th_factor,
                                   U_update=U_update,
                                   min_rank=min_rank,
+                                  verbose=verbose,
                                   stim_knots=stim_knots,
                                   stim_delta=stim_delta)
             Yds[ii]=resultdict[0]

@@ -32,6 +32,7 @@ def temporal(W,
              U_update=False,
              min_rank=1,
              stim_knots=None,
+             verbose=False,
              stim_delta=200):
     """
     Calls greedy temporal denoiser in pixel neighborhood
@@ -48,7 +49,8 @@ def temporal(W,
                                               U_update=U_update,
                                               min_rank=min_rank,
                                               stim_knots=stim_knots,
-                                              stim_delta=stim_delta)
+                                              stim_delta=stim_delta,
+                                              verbose=verbose)
     #print('Temporal denoiser run for %.3f sec'%(time.time()-start))
     return mov_d, ranks
 
@@ -58,6 +60,10 @@ def noise_level(mov_wf,
     """
     Calculate noise level in movie pixels
     """
-    noise_level = noise_estimator.get_noise_fft(mov_wf,
-                                                    noise_range=range_ff)[0]
+    #noise_level = noise_estimator.get_noise_fft(mov_wf,
+    #                                                noise_range=range_ff)[0]
+
+    noise_level = noise_estimator.noise_estimator(V_hat,
+                                                  method='logmexp')[0]
+
     return noise_level
