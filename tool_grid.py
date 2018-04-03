@@ -476,8 +476,8 @@ def run_single(Y,
     ------
     """
     if sys.platform == 'darwin':
-        #print('Darwin')
-        parallel = False
+        print('Darwin')
+        #parallel = False
 
     start=time.time()
 
@@ -583,8 +583,8 @@ def run_single_deprecated_v2(Y,
     # dict
     # Parallel not for mac os single numpy default does not run with lapack
     if sys.platform == 'darwin':
-        #print('Darwin')
-        parallel = False
+        print('Darwin')
+        #parallel = False
 
     start=time.time()
 
