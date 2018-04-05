@@ -35,6 +35,7 @@ def store_output_movie(movie,
 def main(mov_in,
     den_spatial=False,
     den_temporal=False,
+    extract_rank=False,
     store_outputs=False,
     make_movie=False,
     make_plots=False):
