@@ -507,7 +507,8 @@ def run_single(Y,
                               stim_knots=stim_knots,
                               stim_delta=stim_delta,
                               U_update=U_update,
-                              verbose=verbose))
+                              verbose=verbose),
+                              args)
         pool.close()
         pool.join()
 
