@@ -159,6 +159,7 @@ def local_correlations_fft(Y,
     Cn = np.mean(Yconv * Y, axis=0) / MASK
     return Cn
 
+
 def cn_ranks_dx_plot(ranks,
                   dims,
                   nblocks=[10, 10],
@@ -304,21 +305,26 @@ def plot_temporal_traces(V_TF, V_hat=None):
     for idx, vt in enumerate(np.asarray(V_TF)):
         plt.figure(figsize=(15, 5))
         plt.title('Temporal component %d' % idx)
+        plt.plot(vt, 'b-')
         if V_hat is not None:
             if np.ndim(V_hat) <= 1:
-                plt.plot(V_hat, 'b')
+                plt.plot(V_hat, 'r--')
             else:
-                plt.plot(V_hat[idx, :], 'b')
-        plt.plot(vt, 'r')
+                plt.plot(V_hat[idx, :], 'r--')
         plt.show()
     return
 
 
-def plot_spatial_component(U_hat, dims):
+def plot_spatial_component(U_, U_hat=None,dims=None):
     """
     """
-    for ii in range(U_hat.shape[1]):
-        plot_comp(U_hat[:, ii], title_='Spatial component U' +
+    U_hat_c = None
+    for ii in range(U_.shape[1]):
+        if U_hat is not None:
+            U_hat_c = U_hat[:,ii]
+        plot_comp(U_[:, ii],
+            Y_hat=U_hat_c,
+            title_='Spatial component U' +
                   str(ii), dims=dims[:2])
     return
 
@@ -631,6 +637,7 @@ def tiling_grid_plot(W,
     plt.imshow(Cn1)
     plt.show()
     return
+
 
 def spatial_filter_spixel_plot(data,y_hat,hat_k):
     Cn_y, _ = correlation_pnr(data) #

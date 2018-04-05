@@ -2,9 +2,10 @@ import numpy
 import numpy as np
 import scipy as sp
 
+import sklearn
 from scipy.stats import norm
 from sklearn.utils.extmath import randomized_svd
-from sklearn import preprocessing
+#from sklearn import preprocessing
 from skimage.transform import downscale_local_mean
 
 import concurrent
@@ -304,6 +305,7 @@ def compute_svd(M,
                 method='vanilla',
                 n_components=2,
                 n_iter=7,
+                min_value_ = 1e-6,
                 random_state=None,
                reconstruct=False):
     """
@@ -335,6 +337,8 @@ def compute_svd(M,
                 variance of components
                 k = n_components if method='randomized'
     """
+    if M.max() < 1e-3:
+        print('Not feasibe for small numbers ')
 
     if method == 'vanilla':
         U, s, Vt = numpy.linalg.svd(M, full_matrices=False)
@@ -510,7 +514,7 @@ def denoise_patch(M,
     """
     dimsM = M.shape
     M = M.reshape((np.prod(dimsM[:2]), dimsM[2]), order='F')
-
+    M = M.astype('float32')
     #print('greedy here 505')
     start = time.time()
     Yd, vtids = denoise_components(M,
@@ -576,9 +580,13 @@ def greedy_spatial_denoiser(Y,
         #outs_2 = update_U_parallel(Y,V_TF,fudge_factor)
         U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
     else:
-        nus_= np.zeros((Y.shape[0],))
-        U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))));
+        nus_ = np.zeros((Y.shape[0],))
+        try:
+            U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))))
+        except Exception as e:
+            print(e)
 
+    #uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
     return U_hat, nus_
 
 
@@ -605,18 +613,18 @@ def greedy_temporal_denoiser(V_hat,
                                       lagrange_scaled=lagrange_scaled)
              for idx in range(num_components)]
 
-        V_TF, region_indices,lambdas_ = map(np.asarray, zip(*outs_))
+        V_TF, region_indices, lambdas_ = map(np.asarray, zip(*outs_))
 
     else:
-        diff = trefide.difference_operator(num_components)
+        #diff = trefide.difference_operator(num_components)
         #noise_std_ = sp_filters.noise_estimator(V_hat,method='logmexp')
         #noise_std_ = noise_estimator.get_noise_fft(V_hat)[0]
         #print('614')
         noise_std_ = noise_estimator.noise_estimator(V_hat)
         #noise_std_ = denoise.noise_level(V_hat)
         noise_std_ *= fudge_factor
-        print('noise')
-        print(noise_std_)
+        #print('noise')
+        #print(noise_std_)
 
         print('Noise range is %.3e %.3e'%(min(noise_std_),
             max(noise_std_))) if verbose else 0
@@ -629,16 +637,12 @@ def greedy_temporal_denoiser(V_hat,
         V_TF, lambdas_ = map(np.asarray, zip(*np.asarray(outs_)))
         region_indices = None
 
-        print('lambda')
-        print(lambdas_)
-
-    #V_TF = preprocessing.normalize(V_TF, norm='l2')
-    return V_TF,region_indices,lambdas_
+    return V_TF, region_indices, lambdas_
 
 
-def iterative_temporal_denoiser(Y,
+def iterative_temporal_denoiser(Y2,
                                 U_hat_,
-                                V_TF_2,
+                                V_TF_,
                                 lambdas_=None,
                                 region_indices=None,
                                 verbose=False,
@@ -683,17 +687,16 @@ def iterative_temporal_denoiser(Y,
                     updated V_TF_
 
     """
+    #print('686')
+    Y = Y2.copy()
+    V_TF_2 = V_TF_.copy()
     num_components, T = V_TF_2.shape
     norm_U = (U_hat_**2).sum(axis=0)
-
-    if plot_en:
-        V_TF_=V_TF_2.copy()
 
     for ii in range(num_components):
         idx_ = np.setdiff1d(np.arange(num_components),ii)
         R_ = Y - U_hat_[:,idx_].dot(V_TF_2[idx_,:])
         V_ = U_hat_[:,ii].T.dot(R_)/norm_U[ii]
-
         if lambdas_ is None:
             if constraint_segmented:
                 V_2,_, _ = trefide.constrained_l1tf(V_,
@@ -704,36 +707,29 @@ def iterative_temporal_denoiser(Y,
                                                     lagrange_scaled=lagrange_scaled)
             else:
                 # deprecated
-                #noise_std_ = noise_estimator.get_noise_fft(V_[np.newaxis,:])[0]
-                #noise_std_ = denoise.noise_level(V_[np.newaxis,:])
                 noise_std_ = noise_estimator.noise_estimator(V_[np.newaxis,:])
                 if fudge_factor is not None:
                     noise_std_ *=fudge_factor
 
                 print('Solve V_[%d])'%(ii)) if verbose else 0
                 print('Noise range is %.3e %.3e'%
-                        (min(noise_std_),max(noise_std_))) #if verbose else 0
+                        (min(noise_std_),max(noise_std_))) if verbose else 0
 
                 V_2 = c_l1tf_v_hat(V_, noise_std_)[0]
-                print('713')
-                print(lambdas_)
         else:
-            #print('711')
-            #print(lambdas_)
             if isinstance(lambdas_,int) or isinstance(lambdas_,float):
                 V_2 = c_update_V(V_, lambdas_/norm_U[ii])
             else:
                 if region_indices is None:
-                    #print('727')
-                    #print('lambdas_')
-                    #print(lambdas_[ii]/norm_U[ii])
                     V_2 = c_update_V(V_, lambdas_[ii]/norm_U[ii])
                 else:
                     V_2 = c_update_V(V_, lambdas_[ii]/norm_U[ii], region_indices[ii])
 
         V_TF_2[ii,:] = V_2.copy()
-    uplot.plot_temporal_traces(V_TF_2,V_TF_) if plot_en else 0
-    return V_TF_2
+
+    if plot_en:
+        uplot.plot_temporal_traces(V_TF_,V_TF_2)
+    return V_TF_2.astype('float32')
 
 
 def iteration_error(Y,
@@ -747,15 +743,20 @@ def iteration_error(Y,
     F(U,V)=||Y-UV||^2_2 + sum_i lambda_i ||D^2 V_i||_1 + sum_j nu_j ||U_j||_1
     # due to normalization F(U,V) may not decrease monotonically. problem?
     """
-
-    T = Y.shape[1]
+    if np.ndim(V_TF) ==1:
+        num_components=1
+        lambdas_ = 0
+        T = len(V_TF)
+    else:
+        num_components, T = V_TF.shape
     F_uv1 = np.linalg.norm(Y - U_hat.dot(V_TF))**2
 
+    if lambdas_ is None:
+        lambdas_ = [0]*num_components
 
     if region_indices is None:
         diff = trefide.difference_operator(T)
-        F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF.T)),axis=0),axis=0)
-
+        F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF.T)),axis=0), axis=0)
     else:
         F_uv2 = 0
         for ii_, region_ in enumerate(region_indices):
@@ -767,7 +768,6 @@ def iteration_error(Y,
                 F_uv2  = F_uv2 + cte2
 
     F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat),1)) if U_update else 0
-
 
     return F_uv1 , F_uv2, F_uv3
 
@@ -786,8 +786,9 @@ def greedy_component_denoiser(Y,
                               plot_en=False,
                               U_update=False,
                               pca_method='vanilla',
-                              final_regression=True,
+                              final_regression=False,
                               max_num_iters=20,
+                              extra_iterations=5,
                               max_num_components=50,
                               solver='SCS',
                               constraint_segmented=False, # call trefide
@@ -857,20 +858,16 @@ def greedy_component_denoiser(Y,
     #mean_th = mean_th+0.05
     #print('846')
     num_components, T = V_hat.shape
-    #print('843')
-    #print(U_hat.shape)
-    #print(V_hat.shape)
-    #print(dims)
-    #print('852')
-    uplot.plot_temporal_traces(V_hat) if plot_en else 0
-    uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
 
     #####################################################
     # Running iterations
+
+    Y2 = Y.copy()
+
     print('Initialization with %d components'%(num_components)) if verbose else 0
-    print('solve V(i) = argmin_W ||D^2 W||_1 \n'
-          +'\t st ||V_i-W||_2<'
-          +'fudge_factor*sigma_i*sqrt(T)')if verbose else 0
+    #print('solve V(i) = argmin_W ||D^2 W||_1 \n'
+    #      +'\t st ||V_i-W||_2<'
+    #      +'fudge_factor*sigma_i*sqrt(T)')if verbose else 0
     print('Max # of greedy loops: %d (relative convergence)'%max_num_iters) if verbose else 0
 
     rerun_1 = 1 # flag to run part (1)
@@ -882,42 +879,75 @@ def greedy_component_denoiser(Y,
     else:
         print('solve U = Y*pinv(V)') if verbose else 0
 
+    ####################
+    # Begin run
+    ####################
     while rerun_1:
+
         num_components = V_hat.shape[0]
         print('*Iteration %d: initialization %d components'
                 %(iteration, num_components)) if verbose else 0
 
-        print('solve V(i)') if verbose else 0
+        F_UVs = []
+        F_UV1 = []
+        F_UV2 = []
+        F_UV3 = []
+        norm_U = []
+        norm_V = []
 
-        V_TF,region_indices,lambdas_= greedy_temporal_denoiser(V_hat,
+        V_TF, region_indices, lambdas_= greedy_temporal_denoiser(V_hat,
                                                                solver=solver,
                                                                constraint_segmented=constraint_segmented,
                                                                fudge_factor=fudge_factor,
                                                                verbose=verbose
                                                               )
-        uplot.plot_temporal_traces(V_TF,V_hat) if plot_en else 0
-        #print('885')
+        # normalize V_TF
+        norm_V_ = np.sqrt(np.sum(V_TF**2,1))[:,np.newaxis]
+        V_TF = V_TF/norm_V_
+
+        uplot.plot_temporal_traces(V_hat,V_TF) if plot_en else 0
+
+        U_orig = U_hat.copy()
         U_hat, nus_ = greedy_spatial_denoiser(Y,
                                               V_TF,
                                               fudge_factor=fudge_factor,
                                               U_update=U_update,
-                                              dims=dims,
-                                              plot_en=plot_en)
+                                              dims=dims)
+                                              #plot_en=plot_en)
 
-        lambdas_ = lambdas_ * (U_hat**2).sum(axis=0)
+        if plot_en and (not dims==None) :
+            uplot.plot_spatial_component(U_hat,Y_hat =U_orig ,dims=dims)
 
-        print('908')
-        print(lambdas_)
+        original_U_norm = np.sqrt((U_hat**2).sum(axis=0))
+        original_V_norm = np.sqrt((V_TF**2).sum(axis=1))
 
-        uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
+        lambdas_ = lambdas_ * original_U_norm
+
+
 
         print('Iteration %d: begin greedy loops'%(iteration)) if verbose else 0
-        F_UVs = []
-        F_UV1 = []
-        F_UV2 = []
-        F_UV3 = []
 
+        norm_U.append(original_U_norm)
+        norm_V.append(original_V_norm)
+
+        F_uv1, F_uv2, F_uv3 = iteration_error(Y,
+                                              U_hat,
+                                              V_TF,
+                                              region_indices=None,
+                                              lambdas_=lambdas_,
+                                              nus_=nus_,
+                                              U_update=U_update)
+
+        remaining_extra_iterations = extra_iterations
+
+        ##############################################
+        ##############################################
+        # Begin loop
+        ##############################################
+        ##############################################
         for loop_ in range(max_num_iters):
+            if remaining_extra_iterations ==0:
+                break
             print('\tIteration %d loop %d with %d components'%(
                             iteration,loop_,num_components)) if verbose else 0
 
@@ -934,11 +964,6 @@ def greedy_component_denoiser(Y,
                                                constraint_segmented=constraint_segmented,
                                                fudge_factor=fudge_factor)
 
-         # Find error
-            print('Noise')
-            print(region_indices)
-            print(lambdas_)
-            print(nus_)
             F_uv1, F_uv2, F_uv3 = iteration_error(Y,
                                                   U_hat,
                                                   V_TF,
@@ -948,20 +973,34 @@ def greedy_component_denoiser(Y,
                                                   U_update=U_update)
 
             F_uv = F_uv1 + F_uv2 + F_uv3
-            print('\tIteration %d loop %d error (%.3e+%.3e+%.3e)=%.3e'%(
+            print('\tIteration %d loop %d error (%.3e + %.3e + %.3e)= %.3e'%(
                                     iteration,loop_,
                                     F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
 
             print('\tupdate U_j in closed form/regression') if verbose else 0
 
+            norm_V_ = np.sqrt(np.sum(V_TF**2,1))[:,np.newaxis]
+            V_TF = V_TF/norm_V_
+            #norm_U_ = np.sqrt(np.sum(U_hat**2,0))
+            U_orig = U_hat.copy()
             U_hat, _ = greedy_spatial_denoiser(Y,
                                                V_TF,
                                                nus_=nus_,
                                                fudge_factor=fudge_factor,
                                                U_update=U_update,
-                                               dims=dims,
-                                               plot_en=plot_en)
+                                               dims=dims)
+                                               #plot_en=plot_en)
 
+            if plot_en and (not dims==None) :
+                uplot.plot_spatial_component(U_hat,
+                                            Y_hat =U_orig,
+                                            dims=dims)
+
+            U_end_iter = U_hat.copy()
+            V_TF_end_iter = V_TF.copy()
+
+            norm_U.append(np.sqrt(np.sum(U_hat**2,0)))
+            norm_V.append(np.sqrt(np.sum(V_TF**2,1)))
             # Find error
             F_uv1, F_uv2, F_uv3 = iteration_error(Y,
                                                   U_hat,
@@ -970,65 +1009,91 @@ def greedy_component_denoiser(Y,
                                                   lambdas_=lambdas_,
                                                   nus_=nus_,
                                                   U_update=U_update)
+            np.testing.assert_array_equal(U_hat,U_end_iter,err_msg='change in U')
+            np.testing.assert_array_equal(V_TF,V_TF_end_iter,err_msg='change in V')
+            np.testing.assert_array_equal(Y,Y2,err_msg='change in Y')
 
             F_uv = F_uv1 + F_uv2 + F_uv3
             F_UVs.append(F_uv)
             F_UV1.append(F_uv1)
             F_UV2.append(F_uv2)
             F_UV3.append(F_uv3)
-            #print('939')
-            print('\tIteration %d loop %d error (%.3e+%.3e+%.3e)=%.3e'%(
+
+            print('residual diff')
+            residual = Y - U_hat.dot(V_TF)
+            print(residual.max())
+
+            print('\tIteration %d loop %d error (%.3e + %.3e + %.3e)= %.3e\n'%(
                                     iteration,loop_,
                                     F_uv1,F_uv2,F_uv3,F_uv)) if verbose else 0
 
             if loop_ >=1:
-                no_change = np.isclose(F_uv,F_UVs[loop_-1],rtol=1e-04, atol=1e-08)
+                no_change = np.isclose(F_uv, F_UVs[loop_-1],rtol=1e-04, atol=1e-08)
                 bad_iter = F_uv > F_UVs[loop_-1]
                 if no_change or bad_iter:
-                    print('\tIteration %d loop %d end - no significant updates'%(
+                    print('\tIteration %d loop %d end - no significant updates\n'%(
                                             iteration,loop_)) if verbose else 0
-                    break
+                    remaining_extra_iterations -=1
+                    #extra_iterations=0
+                    if bad_iter:
+                        print('***diverged')
 
-        print('992')
+                    if verbose and (remaining_extra_iterations== extra_iterations):
+                        print('\n\n***Begin extra iterations\n\n')
+                    if extra_iterations ==0:
+                        break
         if True:
-            #pass#plot_en:
-            errors_=[F_UVs,F_UV1,F_UV2,F_UV3]
+            errors_loop=[F_UVs,F_UV1,F_UV2,F_UV3]
             error_names=['F_UVs','F_UV1','F_UV2','F_UV3']
-            for ee, error_ in enumerate(errors_):
-                plt.title('Error '+ error_names[ee] +' after %d loops'%loop_)
+            for eerr, error_ in enumerate(errors_loop):
+                plt.title('Error '+ error_names[eerr] +' after %d loops'%loop_)
                 plt.plot(error_,'o-')
                 plt.show()
+                print(error_)
 
-        print('*Iteration %d residual search with %d components'%(
+            for comp_ in range(U_hat.shape[1]):
+                fig, ax_ =plt.subplots(1,2,figsize=(10,5))
+                ax_[0].set_title('Change in U_hat %d'%comp_)
+                ax_[1].set_title('Change in V_TF %d'%comp_)
+                ax_[0].plot(np.asarray(norm_U).T[comp_],'o-')
+                ax_[1].plot(np.asarray(norm_V).T[comp_],'o-')
+                plt.show()
+
+
+        print('*****Iteration %d residual search with %d components'%(
                                 iteration, V_TF.shape[0])) if verbose else 0
 
         ### (2) Compute PCA on residual R  and check for correlated components
-        U_r, s_r, Vt_r = compute_svd((Y-U_hat.dot(V_TF)).astype('float32'),
-                                     method=pca_method)
-
-        #print('965')
-        ctid_r, _ = find_temporal_component(Vt_r,
-                                        confidence=confidence,
-                                        corr=corr,
-                                        kurto=kurto,
-                                        maxlag=maxlag,
-                                        mean_th=mean_th,
-                                        plot_en=plot_en,
-                                        stim_knots=stim_knots,
-                                        stim_delta=stim_delta
-                                        )
-        #print('977')
-        keep1_r = np.where(np.logical_or(ctid_r[0, :] == 1,
-                                        ctid_r[1, :] == 1))[0]
+        residual = Y - U_hat.dot(V_TF)
+        min_threshold = max(np.abs(Y.min()),np.abs(Y.mean()-2*Y.std()))
+        if residual.max() >= min_threshold: # update according to movie dynamic range
+            U_r, s_r, Vt_r = compute_svd(residual,
+                                         method=pca_method)
+            ctid_r, _ = find_temporal_component(Vt_r,
+                                            confidence=confidence,
+                                            corr=corr,
+                                            kurto=kurto,
+                                            maxlag=maxlag,
+                                            mean_th=mean_th,
+                                            plot_en=plot_en,
+                                            stim_knots=stim_knots,
+                                            stim_delta=stim_delta
+                                            )
+            #print('977')
+            keep1_r = np.where(np.logical_or(ctid_r[0, :] == 1,
+                                            ctid_r[1, :] == 1))[0]
+        else:
+            print('Residual <= %.3e'%(min_threshold)) if verbose else 0
+            keep1_r = []
 
         if len(keep1_r)==0:
-            print('Final number of components %d'%V_TF.shape[0]) if verbose else 0
+            print('\nFinal number of components %d'%V_TF.shape[0]) if verbose else 0
             rerun_1 = 0
         else:
-            print('Rerun Iterations - adding %d components'%(len(keep1_r))) if verbose else 0
+            print('Rerun Iterations - adding %d components\n'%(len(keep1_r))) if verbose else 0
             num_components = num_components + len(keep1_r)
             if max_num_components <= num_components:
-                print('Number of components %d > max allowed %d'%(num_components,max_num_components))
+                print('Number of components %d > max allowed %d\n'%(num_components,max_num_components))
                 rerun_1 = 0
             else:
                 rerun_1 = 1
@@ -1036,6 +1101,7 @@ def greedy_component_denoiser(Y,
                 V_hat = np.vstack((V_TF, Vt_r[keep1_r,:]))
                 U_hat = np.hstack((U_hat,U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
 
+        #return
 
     ##################
     ### Final update
@@ -1054,20 +1120,26 @@ def greedy_component_denoiser(Y,
 
     print('\tFinal update of spatial components') if verbose else 0
 
+    U_orig = U_hat.copy()
     U_hat, _ = greedy_spatial_denoiser(Y,
                                        V_TF,
                                        fudge_factor=fudge_factor,
                                        U_update=U_update,
-                                       dims=dims,
-                                       plot_en=plot_en)
+                                       dims=dims)
+                                       #plot_en=plot_en)
+
+    if plot_en and (not dims==None):
+        uplot.plot_spatial_component(U_hat,
+                                    Y_hat=U_orig,
+                                    dims=dims)
 
     if final_regression:
         print('\tFinal regression for V(j)') if verbose else 0
         V_TF_i = np.matmul(np.matmul(np.linalg.inv(np.matmul(U_hat.T, U_hat)), U_hat.T), Y)
+        uplot.plot_temporal_traces(V_TF,V_TF_i) if plot_en else 0
     else:
         V_TF_i = V_TF.copy()
-    uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
-    uplot.plot_temporal_traces(V_TF_i,V_TF) if plot_en else 0
+
     # this needs to be updated to reflect any new rank due to new numb of iterations
     return U_hat , V_TF_i
 
@@ -1104,9 +1176,9 @@ def find_temporal_component(Vt,
                        kurto=kurto,
                        mean_th=mean_th)
 
-    print('1110')
-    print(mean_th)
-    if True:#plot_en:    # Plot temporal correlations
+    #print('1110')
+    #print(mean_th)
+    if plot_en:    # Plot temporal correlations
         keep1 = np.where(np.logical_or(ctid[0, :] == 1,
                         ctid[1, :] == 1))[0]
         uplot.plot_vt_cov(Vt, keep1, maxlag)
@@ -1197,6 +1269,7 @@ def denoise_components(data_all,
                        mean_th=None,
                        greedy=True,
                        mean_th_factor=1.,
+                       max_num_iters=20,
                        mean_th_factor2=1.15,
                        p=1.,
                        fudge_factor=1.,
@@ -1321,7 +1394,6 @@ def denoise_components(data_all,
     # Project back if temporally filtered or downsampled
     #if tfilt or tsub > 1:
     #    Vt = U.T.dot(data.T)
-
     # if greedy Force x2 mean_th (store only big components)
     if greedy and (mean_th_factor <= 1.):
         mean_th_factor = 2.
@@ -1360,7 +1432,7 @@ def denoise_components(data_all,
                                 stim_delta=stim_delta
                                 )
         keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-        uplot.plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
+        #uplot.plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
 
     # If no components to store, exit & return min rank
     if np.all(keep1 == np.nan):
@@ -1399,12 +1471,6 @@ def denoise_components(data_all,
     # call greedy
     if greedy:
         try:
-            #print(U.shape)
-            #print(Vt.shape)
-            #print(data.shape)
-            #print(dims)
-            #print(mean_th)
-            #print(mean_th_factor)
             U, Vt = greedy_component_denoiser(data.T,
                                               U,
                                               Vt,
@@ -1416,6 +1482,7 @@ def denoise_components(data_all,
                                               kurto=kurto,
                                               mean_th=mean_th*mean_th_factor2/mean_th_factor,
                                               U_update=U_update,
+                                              max_num_iters=max_num_iters,
                                               plot_en=plot_en,
                                               verbose=verbose,
                                               pca_method=pca_method,
@@ -1470,7 +1537,7 @@ def c_l1tf_v_hat(v,
     diff = trefide.difference_operator(T)
 
     objective = cp.Minimize(cp.norm(diff*v_hat,1))
-    constraints = [cp.norm(v-v_hat,2)**2<=(sigma**2)*T]
+    constraints = [cp.norm(v-v_hat,2)<=(sigma)*np.sqrt(T)]
 
     cp.Problem(objective, constraints).solve(solver=solver,
                                              max_iters=max_iters,
@@ -1546,7 +1613,7 @@ def l1tf_dual(v,
         #print(lambda_) #if verbose else 0
         v_hat = cp.Variable(T)
         cte2 = lambda_*cp.norm(diff*v_hat,1)
-        objective = cp.Minimize(cp.norm(v-v_hat,2)**2 + cte2)
+        objective = cp.Minimize(cp.norm(v-v_hat, 2)**2 + cte2)
 
         cp.Problem(objective).solve(solver=cvxpy_solver,
                                     max_iters=max_iters,
@@ -1554,7 +1621,7 @@ def l1tf_dual(v,
                                     verbose=False)
 
         v_hat = np.asarray(v_hat.value).flatten()
-        print(v_hat.max())
+        #print(v_hat.max())
     elif solver == 'g_or':
         pass
 
@@ -1617,8 +1684,9 @@ def c_update_V(v,
               verbose=verbose)
 
         v_final[region_.flatten()]=v_hat
-        uplot.plot_temporal_traces(v_hat[:,np.newaxis].T,
-                                   v_[:,np.newaxis].T) if plot_en else 0
+        uplot.plot_temporal_traces(v_[:,np.newaxis].T,
+                                    v_hat[:,np.newaxis].T
+                                   ) if plot_en else 0
     return v_final
 
 
@@ -1682,8 +1750,8 @@ def c_update_V_deprecated(v,
                                     max_iters=max_iters,
                                     verbose=False)
         v_final[region_.flatten()]=np.asarray(v_hat.value).flatten()
-        uplot.plot_temporal_traces(np.asarray(v_hat.value).flatten()
-                [:,np.newaxis].T,v_[:,np.newaxis].T) if plot_en else 0
+        uplot.plot_temporal_traces(v_[:,np.newaxis].T,
+            np.asarray(v_hat.value).flatten()[:,np.newaxis].T) if plot_en else 0
     return v_final
 
 

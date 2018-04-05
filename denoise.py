@@ -63,7 +63,7 @@ def noise_level(mov_wf,
     #noise_level = noise_estimator.get_noise_fft(mov_wf,
     #                                                noise_range=range_ff)[0]
 
-    noise_level = noise_estimator.noise_estimator(V_hat,
-                                                  method='logmexp')[0]
+    noise_level = noise_estimator.noise_estimator(mov_wf,
+                                                  method='logmexp')#0]
 
     return noise_level
