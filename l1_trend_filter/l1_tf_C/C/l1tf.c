@@ -63,7 +63,7 @@ int l1tf(const int n,
     const double BETA       = 0.5;  /* linesearch parameter (0,1) */
     const double MU         = 2;    /* IPM parameter: t update */
     //const double MAXITER    = 40;   /* IPM parameter: max iter. of IPM */
-    const double MAXLSITER  = 20;   /* IPM parameter: max iter. of linesearch */
+    const double MAXLSITER  = 40;   /* IPM parameter: max iter. of linesearch */
     const double TOL        = 1e-4; /* IPM parameter: tolerance */
 
     /* dimension */
@@ -200,11 +200,11 @@ int l1tf(const int n,
             F77_CALL(dgbtrs)("N",&m,&itwo,&itwo,&ione,DDTF,&iseven,IPIV,tmp_m1,&m,&info);
         }
 
-        pobj1 = 0.5*F77_CALL(ddot)(&m,w,&ione,tmp_m1,&ione)
+        pobj1 = 1*F77_CALL(ddot)(&m,w,&ione,tmp_m1,&ione)
                 +lambda*(vecsum(m,mu1)+vecsum(m,mu2));
-        pobj2 = 0.5*zTDDTz + lambda*F77_CALL(dasum)(&m,tmp_m2,&ione);
+        pobj2 = 1*zTDDTz + lambda*F77_CALL(dasum)(&m,tmp_m2,&ione);
         pobj  = min(pobj1,pobj2);
-        dobj  =-0.5*zTDDTz+F77_CALL(ddot)(&m,Dy,&ione,z,&ione);
+        dobj  =-1*zTDDTz+F77_CALL(ddot)(&m,Dy,&ione,z,&ione);
 
         gap   = pobj - dobj;
 
@@ -229,13 +229,13 @@ int l1tf(const int n,
 	    free(z);
 	    free(mu1);
 	    free(mu2);
-	    free(f1); 
-	    free(f2); 
-	    free(dz); 
+	    free(f1);
+	    free(f2);
+	    free(dz);
 	    free(dmu1);
 	    free(dmu2);
 	    free(w);
-	    free(rz);  
+	    free(rz);
 	    free(tmp_m1);
 	    free(tmp_m2);
 	    free(IPIV);
@@ -279,7 +279,7 @@ int l1tf(const int n,
             dmu2[i] = -(mu2[i]+((1/t)-dz[i]*mu2[i])/f2[i]);
         }
         norm2_res = sqrt(norm2_res);
-        
+
         /* BACKTRACKING LINESEARCH */
 
         ratio = 2;   /* any number larger than 1/0.99 */
@@ -353,13 +353,13 @@ int l1tf(const int n,
     free(z);
     free(mu1);
     free(mu2);
-    free(f1); 
-    free(f2); 
-    free(dz); 
+    free(f1);
+    free(f2);
+    free(dz);
     free(dmu1);
     free(dmu2);
     free(w);
-    free(rz);  
+    free(rz);
     free(tmp_m1);
     free(tmp_m2);
     free(IPIV);
@@ -454,7 +454,7 @@ void DTx(const int n, const double *x, double *y)
         *y++ = *x-*(x+1)-*(x+1)+*(x+2); /* y[2..n-1]*/
     *y++ = *x-*(x+1)-*(x+1); x++;       /* y[n]     */
     *y = *x;                            /* y[n+1]   */
-} 
+}
 
 /* Computes y = a./x, where x has length n */
 void yainvx(int n, const double a, const double *x, double *y)

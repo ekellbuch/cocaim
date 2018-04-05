@@ -13,6 +13,7 @@ import denoise
 import util_plot
 import util_movie
 
+import greedyPCA as gpca
 def tic():
 	global startTime_for_tictoc
 	startTime_for_tictoc = time.time()
@@ -31,7 +32,7 @@ def store_output_movie(movie,
 			data = movie)
 	return
 
-def main(mov,
+def main(mov_in,
     den_spatial=False,
     den_temporal=False,
     store_outputs=False,
@@ -44,22 +45,45 @@ def main(mov,
     greedy = True
     dx = 1
     movie_length = 1000
-    verbose = True
+    verbose = False
+    rank_k = 4
     # File name outs
+    fname_out_rk = data_file_out+ '_rk.npz'
     fname_out_wf = data_file_out +'_wf.npz'
     fname_out_pca = data_file_out +'_pca.npz'
     fname_out_movie = data_file_out + '.mp4'
+
+    if extract_rank:
+        tic()
+        print('Extract rank k'%rank_k)
+        mov_mean = mov_in.mean(2,keepdims=True)
+        mov_ = mov_in-mov_mean
+        dims_ = mov_.shape
+        mov_ = mov_.reshape((np.prod(dims_[:2]),dims_[2]),order='F')
+        mov_rk  = gpca.compute_svd(mov_,
+                        method='randomized',
+                        n_components=rank_k,
+                        reconstruct = True)
+        mov_rk  = mov_rk.reshape(dims_,order='F')
+        mov_rk = mov_rk + mov_mean
+        if store_outputs:
+            store_output_movie(mov_rk,
+                            fname_out_rk)
+        toc()
+        mov = mov_in - mov_rk
+    else:
+        mov = mov_in.copy()
 
     if den_spatial:
             tic()
             print('Run spatial denoiser')
             mov_wf = denoise.spatial(mov,
-                                                            gHalf=gHalf)
+                                    gHalf=gHalf)
             toc()
 
             if store_outputs:
                     store_output_movie(mov_wf,
-                                                            fname_out_wf)
+                                        fname_out_wf)
             if make_plots:
                     util_plot.comparison_plot([mov, mov_wf],
                                             option='corr',
@@ -117,12 +141,14 @@ if __name__ == "__main__":
     print(mov.shape)
 
     store_outputs = True
+    extract_rank = True
     den_spatial = True
     den_temporal = True
-    make_movie = True
+    make_movie = False
     make_plots = False
 
     main(mov,
+            extract_rank=extract_rank,
             den_spatial=den_spatial,
             den_temporal=den_temporal,
             store_outputs=store_outputs,

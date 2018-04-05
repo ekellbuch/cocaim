@@ -24,7 +24,7 @@ def spatial(Y_new,
 def temporal(W,
              nblocks=[10,10],
              dx=1,
-             maxlag=10,
+             maxlag=5,
              confidence=0.99,
              greedy=False,
              fudge_factor=0.99,
@@ -60,10 +60,10 @@ def noise_level(mov_wf,
     """
     Calculate noise level in movie pixels
     """
-    #noise_level = noise_estimator.get_noise_fft(mov_wf,
-    #                                                noise_range=range_ff)[0]
+    noise_level = noise_estimator.get_noise_fft(mov_wf,
+                                                    noise_range=range_ff)[0]
 
-    noise_level = noise_estimator.noise_estimator(mov_wf,
-                                                  method='logmexp')#0]
+    #noise_level = noise_estimator.noise_estimator(mov_wf,
+    #                                              method='logmexp')#0]
 
     return noise_level

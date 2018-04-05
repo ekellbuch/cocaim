@@ -29,7 +29,8 @@ def spatial_filter_image(Y_new, gHalf=[2,2], sn=None):
     """
     mean_ = Y_new.mean(axis=2,keepdims=True)
     if sn is None:
-        sn,_= noise_estimator.get_noise_fft(Y_new - mean_)
+        sn = noise_estimator.get_noise_fft(Y_new - mean_)[0]
+        #sn = noise_estimator.noise_estimator(Y_new - mean_)
         if 0:
             plt.title('Noise level per pixel')
             plt.imshow(sn)

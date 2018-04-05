@@ -1,7 +1,6 @@
 import sys
 import numpy as np
 #import preprocess_blockSVD as pre_svd
-
 import multiprocessing
 import time
 import matplotlib.pyplot as plt
@@ -11,29 +10,28 @@ from math import ceil
 from functools import partial
 from itertools import product
 
-def block_split_size(l,n):
-    """
-    For an array of length l that should be split into n sections,
-    calculate the dimension of each section:
-    l%n sub-arrays of size l//n +1 and the rest of size l//n
-    Input:
-    ------
-    l:      int
-            length of array
-    n:      int
-            number of section in which an array of size l
-            will be partitioned
-
-    Output:
-    ------
-    d:      np.array (n,)
-            length of each partitioned array.
-    """
-    d = np.zeros((n,)).astype('int')
-    cut = l%n
-    d[:cut] = l//n+1
-    d[cut:] = l//n
-    return d
+def block_split_size(l, n):
+  """
+  For an array of length l that should be split into n sections,
+  calculate the dimension of each section:
+  l%n sub-arrays of size l//n +1 and the rest of size l//n
+  Input:
+  ------
+  l:      int
+          length of array
+  n:      int
+          number of section in which an array of size l
+          will be partitioned
+  Output:
+  ------
+  d:      np.array (n,)
+          length of each partitioned array.
+  """
+  d = np.zeros((n,)).astype('int')
+  cut = l%n
+  d[:cut] = l//n+1
+  d[cut:] = l//n
+  return d
 
 
 def split_image_into_blocks(image, nblocks=[10,10]):
@@ -250,20 +248,18 @@ def offset_tiling(W,nblocks=[10,10],offset_case=None):
 
 
 def denoise_dx_tiles(W,
-                     nblocks=[10,10],
-                     dx=1,
-                     maxlag=5,
-                     confidence=0.99,
-                     greedy=False,
-                     fudge_factor=0.99,
-                     mean_th_factor=1.15,
-                     U_update=False,
-                     min_rank=1,
-                     verbose=False,
-                     stim_knots=None,
-                     stim_delta=200):
-
-
+                    nblocks=[10,10],
+                    dx=1,
+                    maxlag=5,
+                    confidence=0.99,
+                    greedy=False,
+                    fudge_factor=0.99,
+                    mean_th_factor=1.15,
+                    U_update=False,
+                    min_rank=1,
+                    verbose=False,
+                    stim_knots=None,
+                    stim_delta=200):
     """
     Given matrix W, denoise it according
     Input:
@@ -273,18 +269,18 @@ def denoise_dx_tiles(W,
     ------
     """
     dims = W.shape
-
     W_ = split_image_into_blocks(W,nblocks=nblocks)
 
     dW_,rank_W_ = run_single(W_,
-                             maxlag=maxlag,
-                             confidence=confidence,
-                             fudge_factor=fudge_factor,
-                             mean_th_factor=mean_th_factor,
-                             U_update=U_update,
-                             verbose=verbose,
-                             min_rank=min_rank)
-
+                            confidence=confidence,
+                            fudge_factor=fudge_factor,
+                            greedy=greedy,
+                            maxlag=maxlag,
+                            mean_th_factor=mean_th_factor,
+                            min_rank=min_rank,
+                            U_update=U_update,
+                            verbose=verbose)
+    del W_
     dims_ = list(map(np.shape,dW_))
     dW_ = combine_blocks(dims,
                         dW_,
@@ -293,7 +289,6 @@ def denoise_dx_tiles(W,
     if dx ==1:
         return dW_, rank_W_
 
-    del W_
     W_rs, drs = offset_tiling(W,
                              nblocks=nblocks,
                              offset_case='r')
@@ -302,60 +297,60 @@ def denoise_dx_tiles(W,
     #dims_=[dims,dims_rs,dims_cs,dims_rcs]
     #return W_,W_rs,W_cs,W_rcs, dims_
 
-    dW_rs,rank_W_rs = run_single(W_rs,
-                                 maxlag=maxlag,
-                                 confidence=confidence,
-                                 fudge_factor=fudge_factor,
-                                 mean_th_factor=mean_th_factor,
-                                 U_update=U_update,
-                                 verbose=verbose,
-                                 min_rank=min_rank)
-
+    dW_rs, rank_W_rs = run_single(W_rs,
+                                confidence=confidence,
+                                fudge_factor=fudge_factor,
+                                greedy=greedy,
+                                maxlag=maxlag,
+                                mean_th_factor=mean_th_factor,
+                                min_rank=min_rank,
+                                U_update=U_update,
+                                verbose=verbose)
+    del W_rs
     dims_rs = list(map(np.shape,dW_rs))
 
     dW_rs = combine_blocks(drs,
                         dW_rs,
                         list_order='C')
-    del W_rs
     W_cs, dcs = offset_tiling(W,
                             nblocks=nblocks,
                             offset_case='c')
 
     dW_cs,rank_W_cs = run_single(W_cs,
-                                 maxlag=maxlag,
-                                 confidence=confidence,
-                                 fudge_factor=fudge_factor,
-                                 mean_th_factor=mean_th_factor,
-                                 U_update=U_update,
-                                 verbose=verbose,
-                                 min_rank=min_rank)
-
+                                confidence=confidence,
+                                fudge_factor=fudge_factor,
+                                greedy=greedy,
+                                maxlag=maxlag,
+                                mean_th_factor=mean_th_factor,
+                                min_rank=min_rank,
+                                U_update=U_update,
+                                verbose=verbose)
+    del W_cs
     dims_cs = list(map(np.shape,dW_cs))
 
     dW_cs = combine_blocks(dcs,
                         dW_cs,
                         list_order='C')
-    del W_cs
 
     W_rcs, drcs = offset_tiling(W,
                       nblocks=nblocks,
                       offset_case='rc')
 
     dW_rcs,rank_W_rcs = run_single(W_rcs,
-                             maxlag=maxlag,
-                             confidence=confidence,
-                             fudge_factor=fudge_factor,
-                             mean_th_factor=mean_th_factor,
-                             verbose=verbose,
-                             U_update=U_update,
-                             min_rank=min_rank)
-
+                                  confidence=confidence,
+                                  fudge_factor=fudge_factor,
+                                  greedy=greedy,
+                                  maxlag=maxlag,
+                                  mean_th_factor=mean_th_factor,
+                                  min_rank=min_rank,
+                                  U_update=U_update,
+                                  verbose=verbose)
+    del W_rcs
     dims_rcs = list(map(np.shape,dW_rcs))
 
     dW_rcs = combine_blocks(drcs,
                             dW_rcs,
                             list_order='C')
-    del W_rcs
 
     if False: # debug
         return nblocks, dW_, dW_rs, dW_cs, dW_rcs, dims_, dims_rs, dims_cs, dims_rcs
@@ -396,7 +391,6 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
     drcs    =   dW_rcs.shape
 
     # Get pyramid functions for each grid
-    #ak1,ak2,ak3 = [np.zeros(dims[:2])]*3
     ak1 = np.zeros(dims[:2])
     ak2 = np.zeros(dims[:2])
     ak3 = np.zeros(dims[:2])
@@ -424,7 +418,8 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
 
     #return ak0,ak1,ak2,ak3,patches,W_rs,W_cs,W_rcs
     if False:
-        return ak0,ak1,ak2,ak3
+      print('427 -- debug')
+      return ak0,ak1,ak2,ak3
 
     W1 = np.zeros(dims)
     W2 = np.zeros(dims)
@@ -454,17 +449,19 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
 
 
 def run_single(Y,
-            parallel=True,
-               maxlag=5,
-               confidence=0.999,
-               greedy=False,
-               fudge_factor=0.99,
-               mean_th_factor=1.15,
-               U_update=False,
-               min_rank=1,
-               verbose=False,
-               stim_knots=None,
-               stim_delta=200):
+              confidence=0.999,
+              debug = False,
+              fudge_factor=0.99,
+              greedy=False,
+              maxlag=5,
+              mean_th_factor=1.15,
+              min_rank=1,
+              parallel=True,
+              stim_knots=None,
+              stim_delta=200,
+              U_update=False,
+              verbose=False
+              ):
     """
     Run denoiser in each movie in the list Y.
     Inputs:
@@ -481,8 +478,13 @@ def run_single(Y,
             rank or final number of components stored for each movie.
     ------
     """
+    if debug:
+      print('485-debug')
+      vtids = np.zeros((len(Y),))
+      return Y, vtids
+
     if sys.platform == 'darwin':
-        #print('Darwin')
+        print('parallel version not for Darwin')
         parallel = False
 
     start=time.time()
@@ -496,40 +498,40 @@ def run_single(Y,
                                               cpu_count))#if verbose else 0
         # define params in function
         c_outs = pool.starmap(partial(gpca.denoise_patch,
-                                      maxlag=maxlag,
-                                      confidence=confidence,
-                                      greedy=greedy,
-                                      fudge_factor=fudge_factor,
-                                      mean_th_factor=mean_th_factor,
-                                      U_update=U_update,
-                                      verbose=verbose,
-                                      min_rank=min_rank,
-                                      stim_knots=stim_knots,
-                                      stim_delta=stim_delta),
-                                    args)
+                              confidence=confidence,
+                              fudge_factor=fudge_factor,
+                              greedy=greedy,
+                              maxlag=maxlag,
+                              mean_th_factor=mean_th_factor,
+                              min_rank=min_rank,
+                              stim_knots=stim_knots,
+                              stim_delta=stim_delta,
+                              U_update=U_update,
+                              verbose=verbose))
         pool.close()
         pool.join()
 
         Yds = [out_[0] for out_ in c_outs]
         vtids = [out_[1] for out_ in c_outs]
     else:
-        Yds = [None]*len(Y)
-        vtids = [None]*len(Y)
-        for ii, patch in enumerate(Y):
-            resultdict = gpca.denoise_patch(patch,
-                                  maxlag=maxlag,
-                                  confidence=confidence,
-                                  greedy=greedy,
-                                  fudge_factor=fudge_factor,
-                                  mean_th_factor=mean_th_factor,
-                                  U_update=U_update,
-                                  min_rank=min_rank,
-                                  verbose=verbose,
-                                  stim_knots=stim_knots,
-                                  stim_delta=stim_delta)
-            Yds[ii]=resultdict[0]
-            vtids[ii]=resultdict[1]
-
+      Yds = [None]*len(Y)
+      vtids = [None]*len(Y)
+      for ii, patch in enumerate(Y):
+          y_ , vt_ = gpca.denoise_patch(patch,
+                            confidence=confidence,
+                            fudge_factor=fudge_factor,
+                            greedy=greedy,
+                            maxlag=maxlag,
+                            mean_th_factor=mean_th_factor,
+                            min_rank=min_rank,
+                            stim_knots=stim_knots,
+                            stim_delta=stim_delta,
+                            U_update=U_update,
+                            verbose=verbose)
+          Yds[ii]=y_
+          vtids[ii]=vt_
+      #print('535debug')
+    #return
     vtids = np.asarray(vtids).astype('int')
 
     print('Blocks(=%d) run time: %f'%(len(Y),time.time()-start))
@@ -622,9 +624,7 @@ def run_single_deprecated_v2(Y,
         Yds=[]
         vtids=[]
         for c_out in resultdict:
-            print('537')
             print(c_out)
-            print('539')
             print(len(resultdict[c_out]))
             print(resultdict[c_out][0].shape)
             #for out_ in c_out:
@@ -632,7 +632,7 @@ def run_single_deprecated_v2(Y,
             #    vtids.append(out_[1])
         #print(len(Yds))
         #print(len(vtids))
-            
+
             #Yds = #[out_[0] for out_ in c_out]
             #vtids = [out_[1] for out_ in c_out]
 
@@ -914,32 +914,72 @@ def test_pyramids(dims,dims_rs,dims_cs,dims_rcs,W_1,W_rs,W_cs,W_rcs,row_cut,col_
     return
 
 
-def test_off_grids(W,nblocks=[10,10]):
-    """
-    Input:
-    ------
-    Output:
-    ------
-    """
-    dims = W.shape
-    col_array,row_array = tile_row_col_dimensions(dims,nblocks)
-    dims_rs, dims_cs,dims_rcs, r_offset,c_offset = extract_4dx_grid(dims,row_array,col_array)
+def test_off_grids(mov_nn, nblocks=[10,10]):
+  """
+  Input:
+  ------
+  Output:
+  ------
+  """
+  dims = mov_nn.shape
 
-    row_cut = row_array[:-1]+r_offset
-    col_cut = col_array[:-1]+c_offset
-    W_rs,W_cs,W_rcs = extract_off(W,r_offset,c_offset,row_cut,col_cut)
+  ## denoiser 1
+  W_ = split_image_into_blocks(mov_nn,nblocks=nblocks)
 
-    W_ = split_image_into_blocks(W,nblocks=[10,10])
-    W_r = combine_blocks(dims,W_,list_order='C')
-    W_rsr = combine_blocks(dims_rs,W_rs,list_order='F')
-    W_csr = combine_blocks(dims_cs,W_cs,list_order='F')
-    W_rcsr = combine_blocks(dims_rcs,W_rcs,list_order='F')
+  dW_,rank_W_ = run_single(W_,debug=True)
+  del W_
+  dims_ = list(map(np.shape,dW_))
+  dW_ = combine_blocks(dims,
+                      dW_,
+                      list_order='C')
 
-    assert np.array_equiv(W_r,W)
-    assert np.array_equiv(W[:,row_cut[0]:row_cut[-1],:],W_rsr)
-    assert np.array_equiv(W[col_cut[0]:col_cut[-1],::],W_csr)
-    assert np.array_equiv(W[col_cut[0]:col_cut[-1],row_cut[0]:row_cut[-1],:],W_rcsr)
-    return
+  ## denoiser 2
+  W_rs, drs = offset_tiling(mov_nn,
+                           nblocks=nblocks,
+                           offset_case='r')
+  dW_rs,rank_W_rs = run_single(W_rs,debug=True)
+  del W_rs
+  dims_rs = list(map(np.shape,dW_rs))
+  dW_rs = combine_blocks(drs,
+                    dW_rs,
+                    list_order='C')
+
+  # denoiser 3
+  W_cs, dcs = offset_tiling(mov_nn,
+                        nblocks=nblocks,
+                        offset_case='c')
+  dW_cs,rank_W_cs = run_single(W_cs,
+                              debug=True)
+  del W_cs
+  dims_cs = list(map(np.shape,dW_cs))
+  dW_cs = combine_blocks(dcs,
+                      dW_cs,
+                      list_order='C')
+
+  # denoiser 4
+  W_rcs, drcs = offset_tiling(mov_nn,
+                    nblocks=nblocks,
+                    offset_case='rc')
+
+  dW_rcs,rank_W_rcs = run_single(W_rcs,debug=True)
+  del W_rcs
+  dims_rcs = list(map(np.shape,dW_rcs))
+  dW_rcs = combine_blocks(drcs,
+                          dW_rcs,
+                          list_order='C')
+  row_array,col_array = tile_grids(dims,nblocks)
+
+  r_offset = vector_offset(row_array)
+  c_offset = vector_offset(col_array)
+
+  r1, r2 = (row_array[1:]-r_offset)[[0,-1]]
+  c1, c2 = (col_array[1:]-c_offset)[[0,-1]]
+
+  print (np.array_equiv(mov_nn,dW_))
+  print (np.array_equiv(mov_nn[r1:r2,:,:],dW_rs))
+  print (np.array_equiv(mov_nn[:,c1:c2,:],dW_cs))
+  print (np.array_equiv(mov_nn[r1:r2,c1:c2,:],dW_rcs))
+  return
 
 
 def test_running_times(W,nblocks=[4,30]):

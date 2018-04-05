@@ -285,10 +285,10 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
         plots_ = zip(ax, [Y, Y_hat, R])
 
     for ax_, arr in plots_:
-        if len(dims) > 2:
+        if np.ndim(arr) > 2:
             ims = ax_.imshow(arr.reshape(dims, order='F')[:, :, idx_])
         else:
-            ims = ax_.imshow(arr.reshape(dims, order='F'))
+            ims = ax_.imshow(arr.reshape(dims[:2], order='F'))
         #ims = ax_.imshow(arr.reshape(dims,order='F').var(2))
         d = make_axes_locatable(ax_)
         cax0 = d.append_axes("bottom", size="5%", pad=0.5)
@@ -315,13 +315,19 @@ def plot_temporal_traces(V_TF, V_hat=None):
     return
 
 
-def plot_spatial_component(U_, U_hat=None,dims=None):
+def plot_spatial_component(U_, Y_hat=None,dims=None):
     """
     """
+    if np.ndim(U_) ==1:
+        U_=U_[:,np.newaxis]
+
+    if np.ndim(Y_hat) ==1:
+        Y_hat=Y_hat[:,np.newaxis]
+
     U_hat_c = None
     for ii in range(U_.shape[1]):
-        if U_hat is not None:
-            U_hat_c = U_hat[:,ii]
+        if Y_hat is not None:
+            U_hat_c = Y_hat[:,ii]
         plot_comp(U_[:, ii],
             Y_hat=U_hat_c,
             title_='Spatial component U' +
