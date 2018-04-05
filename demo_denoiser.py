@@ -42,8 +42,8 @@ def main(mov_in,
 
     gHalf = [2,2]
     range_ff=[0.25,0.5]
-    nblocks = [10,10]
-    greedy = True
+    nblocks = [6,6]
+    greedy = False
     dx = 1
     movie_length = 1000
     verbose = False
@@ -56,7 +56,7 @@ def main(mov_in,
 
     if extract_rank:
         tic()
-        print('Extract rank k'%rank_k)
+        print('Extract rank k %d'%rank_k)
         mov_mean = mov_in.mean(2,keepdims=True)
         mov_ = mov_in-mov_mean
         dims_ = mov_.shape
