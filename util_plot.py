@@ -299,18 +299,23 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
     return
 
 
-def plot_temporal_traces(V_TF, V_hat=None):
+def plot_temporal_traces(V_TF, V_hat=None,title_=''):
     """
     """
+    if np.ndim (V_TF)==1:
+        V_TF =V_TF[np.newaxis,:]
+    if np.ndim (V_hat)==1:
+        v_hat = V_hat[np.newaxis,:]
+    else:
+        v_hat = V_hat
+
     for idx, vt in enumerate(np.asarray(V_TF)):
         plt.figure(figsize=(15, 5))
-        plt.title('Temporal component %d' % idx)
+        plt.title(('Temporal component %d'+ title_)% idx)
         plt.plot(vt, 'b-')
-        if V_hat is not None:
-            if np.ndim(V_hat) <= 1:
-                plt.plot(V_hat, 'r--')
-            else:
-                plt.plot(V_hat[idx, :], 'r--')
+        if v_hat is not None:
+            plt.plot(v_hat[idx, :], 'r--')
+            plt.legend(['raw','denoised'])
         plt.show()
     return
 

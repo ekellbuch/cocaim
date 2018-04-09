@@ -257,9 +257,7 @@ def denoise_dx_tiles(W,
                     mean_th_factor=1.15,
                     U_update=False,
                     min_rank=1,
-                    verbose=False,
-                    stim_knots=None,
-                    stim_delta=200):
+                    verbose=False,):
     """
     Given matrix W, denoise it according
     Input:
@@ -483,6 +481,9 @@ def run_single(Y,
       vtids = np.zeros((len(Y),))
       return Y, vtids
 
+      mean_th = wnoise_acov_CI(Y[0].shape[2],
+                               confidence=confidence,
+                               maxlag=maxlag)
     if sys.platform == 'darwin':
         print('parallel version not for Darwin')
         parallel = False
@@ -502,6 +503,7 @@ def run_single(Y,
                               fudge_factor=fudge_factor,
                               greedy=greedy,
                               maxlag=maxlag,
+                              mean_th=mean_th,
                               mean_th_factor=mean_th_factor,
                               min_rank=min_rank,
                               stim_knots=stim_knots,
@@ -529,8 +531,8 @@ def run_single(Y,
                             stim_delta=stim_delta,
                             U_update=U_update,
                             verbose=verbose)
-          Yds[ii]=y_
-          vtids[ii]=vt_
+          Yds[ii] = y_
+          vtids[ii] = vt_
       #print('535debug')
     #return
     vtids = np.asarray(vtids).astype('int')
