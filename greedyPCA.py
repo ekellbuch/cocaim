@@ -12,7 +12,7 @@ import cvxpy as cp
 import multiprocessing
 import itertools
 import time
-
+import math
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.pyplot as plt
 
@@ -419,6 +419,9 @@ def spatial_decimation(data,
     if ndim<3:
         dims_ = data_0.shape
         data_0 = data_0.reshape((np.prod(dims_[:2]),dims_[2]), order='F').T
+
+    #print(data_0.shape)
+    #print('424')
     return data_0
 
 
@@ -613,6 +616,9 @@ def l1tf_lagrangian(V_,
             solver_obj.lambda_ = lambda_
             V_TF = solver_obj.denoise(np.double(V_),
                                         refit=False)
+            if np.sqrt(np.abs(solver_obj.delta)) <= 1e-3:
+                print('\n not OVERWRITTING\n')
+                #V_TF=V_.copy()
 
         except:
             print('AS failed. try PD')
@@ -640,14 +646,24 @@ def l1tf_constrained(V_hat,
 
     if solver == 'trefide':
         num_components, len_signal = V_hat.shape
-        denoise_filters = [TrendFilter(len_signal)]*num_components
-        #print('started trefide constrained')
-        V_TF = np.asarray([filt.denoise(signal)
-                    for signal, filt in zip(np.double(V_hat), denoise_filters)])
-        #print('ended trefide constrained')
+        V_TF= V_hat.copy()
 
-        lambdas_ = [filt.lambda_ for filt in denoise_filters]
-        noise_std_ = [filt.delta for filt in denoise_filters]
+        lambdas_ = []
+        noise_std_ = []
+        denoise_filters = []
+        for ii in range(num_components):
+            filt = TrendFilter(len_signal)
+            V_TF[ii,:] = np.asarray(filt.denoise(V_hat[ii,:]))
+            noise_std_.append(filt.delta)
+
+            if np.sqrt(filt.delta)<=1e-3:
+                print('here')
+                #V_TF[ii,:]=V_hat[ii,:]
+                lambdas_.append(0)
+            else:
+                lambdas_.append(filt.lambda_)
+            denoise_filters.append(filt)
+            filt=[]
 
     elif solver == 'cvxpy':
         noise_std_ = denoise.noise_level(V_hat)
@@ -662,9 +678,11 @@ def l1tf_constrained(V_hat,
 
         denoise_filters=[None]*len(lambdas_)
 
-    if verbose:
-        print('Noise range is %.3e %.3e'%(
-            min(noise_std_), max(noise_std_)))
+        if verbose:
+            print('Noise range is %.3e %.3e'%(
+                min(noise_std_), max(noise_std_)))
+    else:
+        print('not a solver')
 
     return V_TF, lambdas_ , denoise_filters
 
@@ -686,7 +704,7 @@ def iteration_error(Y,
     F_uv1 = np.linalg.norm(Y - U_hat.dot(V_TF))**2
 
     #print('scaling lambda')
-    #lambdas_ = lambdas_*np.sum(U_hat**2,0)
+    lambdas_ = lambdas_*np.sqrt(np.sum(U_hat**2,0))
     if region_indices is None:
         diff = difference_operator(T)
         F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF.T)),axis=0), axis=0)
@@ -729,9 +747,15 @@ def greedy_temporal_denoiser(Y,
         else:
             V_=V_/np.sqrt(np.sum(V_**2))
             if solver == 'cvxpy':
-                clambda = lambda_[ii]/norm_U2[ii]
+                clambda = lambda_[ii]/np.sqrt(norm_U2[ii])
             elif solver =='trefide':
-                clambda = lambda_[ii]/norm_U2[ii]
+                if np.sqrt(np.abs(solver_obj[ii].delta))<=1e-3:
+                    print('\n748 for ii %s\n'%ii)
+                    clambda = 0
+                    continue
+                else:
+                    clambda = lambda_[ii]/np.sqrt(norm_U2[ii])
+
             V_2 = l1tf_lagrangian(V_,
                                 lambda_=clambda,
                                 solver=solver,
@@ -770,7 +794,7 @@ def greedy_component_denoiser(Y,
     num_components, T = V_TF.shape
     Y2 = Y.copy()
     #####################################################
-    print('Initial error')
+    print('Initial error ||Y-UV||_F^2')
     print(np.linalg.norm(Y-U_hat.dot(V_TF))**2)
     # Running iterations
     print('Initialization with %d components'%(num_components)) if verbose else 0
@@ -840,9 +864,9 @@ def greedy_component_denoiser(Y,
             print(lambdas_)
 
         #print('\nTHIS IS AN ERROR\n')
-        #lambdas_ = lambdas_ * (norm_Uinit)
+        lambdas_ = lambdas_ * (norm_Uinit)
         #print('not scaling lambda')
-        lambdas_ = lambdas_ * (norm_Uinit**2)
+        #lambdas_ = lambdas_ * (norm_Uinit**2)
 
         if verbose:
             print('lambdas after scaling by norm U2')
@@ -868,7 +892,8 @@ def greedy_component_denoiser(Y,
         for loop_ in range(max_num_iters):
 
             if remaining_extra_iterations == 0:
-                print('remaining_extra_iterations %d'%remaining_extra_iterations)
+                if verbose:
+                    print('remaining_extra_iterations %d'%remaining_extra_iterations)
                 break
 
             print('\t Run %d iteration %d with %d components'%(run_count,
@@ -936,6 +961,14 @@ def greedy_component_denoiser(Y,
             ###################
             ### Calculate error in current iteration
             ####################
+            #print('lambda')
+            #print(lambdas_)
+
+            if np.any([math.isnan(lambda_) for lambda_ in lambdas_]):
+                print('NAN lambda_')
+                remaining_extra_iterations = 0
+
+
             F_uv1, F_uv2, F_uv3 = iteration_error(Y,
                                                   U_hat,
                                                   V_TF,
@@ -967,10 +1000,9 @@ def greedy_component_denoiser(Y,
                     print('\tIteration %d loop %d end - no significant updates\n'%(
                                             run_count,loop_)) if verbose else 0
                     if bad_iter:
-                        print('***diverged')
-
+                        print('***diverged') if verbose else 0
                     if (remaining_extra_iterations == extra_iterations):
-                        print('\n\n***Begin extra iterations\n\n') if verbose else 0
+                        print('\n\n***Begin extra iterations after %d iters\n\n'%(loop_)) #if verbose else 0
                     else:
                         if verbose:
                             print('Remaining iterations %d'%remaining_extra_iterations)
@@ -979,12 +1011,12 @@ def greedy_component_denoiser(Y,
                         print('remaining_extra_iterations ==0') if verbose else 0
                         break
                     else:
-                        print('Extra iterations minus 1')
+                        print('Extra iterations minus 1') if verbose else 0
                         remaining_extra_iterations = remaining_extra_iterations-1
                         #continue
 
                 else:
-                    print('Did not converge in iteration %d\n'%loop_)
+                    print('Did not converge in iteration %d\n'%loop_) if verbose else 0
 
         if True:#plot_en:
             errors_loop=[F_UVs,F_UV1,F_UV2,F_UV3]
@@ -1021,7 +1053,7 @@ def greedy_component_denoiser(Y,
 
             if np.abs(s_r.max()) <= residual_min_threshold:
                 if verbose:
-                    print('did not make the cut based on component variance') #if verbose
+                    print('did not make the cut based on component variance') if verbose else 0
                 keep1_r=[]
             else:
                 ctid_r, _ = find_temporal_component(Vt_r,
@@ -1044,7 +1076,9 @@ def greedy_component_denoiser(Y,
         else:
             if np.abs(s_r[keep1_r].max()) <=residual_min_threshold:
                 print('did not make the cut based on component variance')
-                keep1_r=[]
+                keep1_r = []
+                rerun_1 = 0
+                continue
 
             print('Rerun Iterations - adding %d components\n'%(len(keep1_r))) if verbose else 0
             num_components = num_components + len(keep1_r)
@@ -1058,15 +1092,16 @@ def greedy_component_denoiser(Y,
                 U_hat = np.hstack((U_hat, U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
 
         #return
-        print('1109')
-        uplot.plot_temporal_traces(V_init,V_hat=V_TF)
-        if len(keep1_r)>0:
-            print('Extra')
-            print(s_r[keep1_r])
-            uplot.plot_temporal_traces(Vt_r[keep1_r,:])
-        print('Goodbye')
+        if False:
+            print('1109')
+            uplot.plot_temporal_traces(V_init,V_hat=V_TF)
+            if len(keep1_r)>0:
+                print('Extra')
+                print(s_r[keep1_r])
+                uplot.plot_temporal_traces(Vt_r[keep1_r,:])
+            print('Goodbye')
 
-        return
+            #return
     ##################
     ### Final update
     ##################
@@ -1175,11 +1210,13 @@ def decimation_interpolation(data,
     print('Decimation interpolation') if verbose else 0
     #print(data.shape)
     #print(dims)
-    data_tsd = temporal_decimation(data.T, tsub)
-
-    U, s, Vt = compute_svd(data_tsd.T,
+    #print(rank)
+    data_tsd = temporal_decimation(data.T, tsub).T
+    #print(data_tsd.shape)
+    U, s, Vt = compute_svd(data_tsd,
                             n_components=rank,
                             method='randomized')
+
     U = U.dot(np.diag(s))
     ndims_=dims[0]//ds, dims[1]//ds, dims[2]
 
@@ -1187,7 +1224,8 @@ def decimation_interpolation(data,
     # upsample temporal
     x_interp = np.linspace(0,dims[2],dims[2])
     xp_ = x_interp[::tsub]
-    Vt_interp = np.zeros((rank,dims[2]))
+    Vt_interp = np.zeros((rank, dims[2]))
+
     for comp_ in range(rank):
         Vt_interp[comp_,:] = np.interp(x_interp,xp_,Vt[comp_,:])
 
@@ -1197,11 +1235,7 @@ def decimation_interpolation(data,
     U_ds = sp.ndimage.zoom(U_ds, (ds,ds, 1 ))
     U_ds = U_ds.reshape((np.prod(dims[:2]), rank), order='F')
     #print('1106')
-    print(dims)
-    print(ndims_)
-    print(U_ds.shape)
-    print(Vt_interp.shape)
-    #return
+
     return U_ds, Vt_interp
 
 
@@ -1227,6 +1261,7 @@ def denoise_components(data,
                         decimation_flag=False,
                         dims=None,
                         ds=1,
+                        extra_iterations=1,
                         fudge_factor=1.,
                         greedy=True,
                         maxlag=5,
@@ -1300,6 +1335,7 @@ def denoise_components(data,
     mu = data.mean(1, keepdims=True)
     #std = data.std(1,keepdims=True)
     #data = (data - mu)/std
+    data1 = data.copy()
 
     # spatially decimate the data
     if ds > 1:
@@ -1373,12 +1409,13 @@ def denoise_components(data,
     if greedy:
         try:
             mean_th = mean_th*mean_th_factor2/mean_th_factor
-            U, Vt = greedy_component_denoiser(data,
+            U, Vt = greedy_component_denoiser(data1,
                                             U,
                                             Vt,
                                             confidence=confidence,
                                             corr=corr,
                                             dims=dims,
+                                            extra_iterations=extra_iterations,
                                             fudge_factor=fudge_factor,
                                             maxlag=maxlag,
                                             max_num_iters=max_num_iters,
@@ -1433,7 +1470,7 @@ def c_l1tf_v_hat(v,
     diff = difference_operator(T)
     objective = cp.Minimize(cp.norm(diff*v_hat,1))
 
-    constraints = [cp.norm(v-v_hat,2)<=(sigma)*np.sqrt(T)]
+    constraints = [cp.norm(v-v_hat,2)**2<=(sigma**2)*T]
 
     cp.Problem(objective, constraints).solve(solver=solver,
                                              max_iters=max_iters,
