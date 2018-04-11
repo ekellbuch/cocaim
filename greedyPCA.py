@@ -581,8 +581,8 @@ def greedy_spatial_denoiser(Y,
     else:
         nus_ = None#np.zeros((Y.shape[0],))
         try:
-            #U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))))
-            U_hat = Y.dot((V_TF.T.dot(np.linalg.inv(V_TF.dot(V_TF.T)))))
+            U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))))
+            #U_hat = Y.dot((V_TF.T.dot(np.linalg.inv(V_TF.dot(V_TF.T)))))
         except Exception as e:
             print(e)
     #uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
@@ -590,8 +590,6 @@ def greedy_spatial_denoiser(Y,
 
 
 def component_norm(V_TF_,U_hat_,verbose=False,title=''):
-
-
     norm_U = np.sqrt(np.sum(U_hat_**2,0))#[:,np.newaxis]
     norm_V = np.sqrt(np.sum(V_TF_**2,1))[:,np.newaxis]
     if verbose:
@@ -601,7 +599,6 @@ def component_norm(V_TF_,U_hat_,verbose=False,title=''):
         print(norm_U)
 
     return norm_V, norm_U
-
 
 
 def l1tf_lagrangian(V_,
@@ -616,12 +613,9 @@ def l1tf_lagrangian(V_,
             solver_obj.lambda_ = lambda_
             V_TF = solver_obj.denoise(np.double(V_),
                                         refit=False)
-            if np.sqrt(np.abs(solver_obj.delta)) <= 1e-3:
-                print('\n not OVERWRITTING\n')
-                #V_TF=V_.copy()
 
         except:
-            print('AS failed. try PD')
+            print('PDAS failed. try IPM')
             V_TF = l1_tf(V_,
                         lambda_,
                         False,
@@ -690,6 +684,7 @@ def l1tf_constrained(V_hat,
 def iteration_error(Y,
                     U_hat,
                     V_TF,
+                    scale_lambda_=None,
                     region_indices=None,
                     lambdas_=None,
                     nus_=None):
@@ -703,11 +698,19 @@ def iteration_error(Y,
     num_components, T = V_TF.shape
     F_uv1 = np.linalg.norm(Y - U_hat.dot(V_TF))**2
 
-    #print('scaling lambda')
-    lambdas_ = lambdas_*np.sqrt(np.sum(U_hat**2,0))
+    lambdas_2 = lambdas_
+    if scale_lambda_ == 'norm':
+        lambdas_2 = lambdas_2*np.sqrt(np.sum(U_hat**2,0))
+    elif scale_lambda_ == 'norm2':
+        pass
+    elif scale_lambda_ is None:
+        lambdas_2 = lambdas_2*np.sum(U_hat**2,0)
+    else:
+        print('error')
+
     if region_indices is None:
         diff = difference_operator(T)
-        F_uv2  = np.sum(lambdas_*np.sum(np.abs(diff.dot(V_TF.T)),axis=0), axis=0)
+        F_uv2  = np.sum(lambdas_2*np.sum(np.abs(diff.dot(V_TF.T)),axis=0), axis=0)
     else:
         pass
     if nus_ is None:
@@ -722,12 +725,12 @@ def greedy_temporal_denoiser(Y,
                             U_hat_,
                             V_TF_,
                             lambda_=None,
+                            scale_lambda_=None,
                             plot_en=False,
                             solver='trefide',
                             solver_obj=None,
                             ):
 
-    #Y = Y2.copy()
     #if plot_en:
     V_TF_2 = V_TF_.copy()
 
@@ -739,31 +742,35 @@ def greedy_temporal_denoiser(Y,
         R_ = Y - U_hat_[:,idx_].dot(V_TF_2[idx_,:])
         V_ = U_hat_[:,ii].T.dot(R_)/norm_U2[ii]
 
+        norm_Vnew = np.linalg.norm(V_, 2)
+        norm_Vdiff = np.linalg.norm(V_TF_2[ii,:]-V_, 2)
+
+        if norm_Vdiff/norm_Vnew >= 1:
+            continue
+
         if lambda_ is None:
             V_2 = l1tf_constrained(V_,
                                 solver=solver,
                                 verbose=False
                                 )[0]
         else:
+            clambda = lambda_[ii]
             V_=V_/np.sqrt(np.sum(V_**2))
-            if solver == 'cvxpy':
-                clambda = lambda_[ii]/np.sqrt(norm_U2[ii])
-            elif solver =='trefide':
-                if np.sqrt(np.abs(solver_obj[ii].delta))<=1e-3:
-                    print('\n748 for ii %s\n'%ii)
-                    clambda = 0
-                    continue
-                else:
-                    clambda = lambda_[ii]/np.sqrt(norm_U2[ii])
+            if scale_lambda_ == 'norm':
+                clambda = clambda/np.sqrt(norm_U2[ii])
+            elif scale_lambda_ == 'norm2':
+                clambda = clambda/norm_U2[ii]
+            elif scale_lambda_ is None:
+                pass
+            else:
+                print('error')
 
             V_2 = l1tf_lagrangian(V_,
                                 lambda_=clambda,
                                 solver=solver,
                                 solver_obj=solver_obj[ii]
                                 )
-        #print('634 - norm V2')
-        #print(np.sqrt((V_2**2).sum()))
-        V_TF_2[ii,:] = V_2.copy()#/np.sqrt((V_2**2).sum())
+        V_TF_2[ii,:] = V_2
 
     if plot_en:
         uplot.plot_temporal_traces(V_TF_, V_hat=V_TF_2)
@@ -784,6 +791,7 @@ def greedy_component_denoiser(Y,
                               max_num_iters=10,
                               mean_th=None,
                               plot_en=False,
+                              scale_lambda_='norm2',
                               solver='cvxpy',
                               U_update=False,
                               verbose=False
@@ -863,10 +871,14 @@ def greedy_component_denoiser(Y,
             print('lambdas before scaling by norm U2')
             print(lambdas_)
 
-        #print('\nTHIS IS AN ERROR\n')
-        lambdas_ = lambdas_ * (norm_Uinit)
-        #print('not scaling lambda')
-        #lambdas_ = lambdas_ * (norm_Uinit**2)
+        if scale_lambda_ == 'norm2':
+            lambdas_ = lambdas_ * (norm_Uinit**2)
+        elif scale_lambda_ == 'norm':
+            lambdas_ = lambdas_ * (norm_Uinit)
+        elif scale_lambda_ is None:
+            pass
+        else:
+            print('error')
 
         if verbose:
             print('lambdas after scaling by norm U2')
@@ -907,6 +919,7 @@ def greedy_component_denoiser(Y,
                                             U_hat,
                                             V_TF,
                                             lambda_=lambdas_,
+                                            scale_lambda_=scale_lambda_,
                                             plot_en=plot_en,
                                             solver=solver,
                                             solver_obj=solver_obj,
@@ -972,6 +985,7 @@ def greedy_component_denoiser(Y,
             F_uv1, F_uv2, F_uv3 = iteration_error(Y,
                                                   U_hat,
                                                   V_TF,
+                                                  scale_lambda_=scale_lambda_,
                                                   lambdas_=lambdas_,
                                                   nus_=nus_)
 
@@ -1044,17 +1058,19 @@ def greedy_component_denoiser(Y,
 
         ### (2) Compute PCA on residual R  and check for correlated components
         residual = Y - U_hat.dot(V_TF)
-        residual_min_threshold = max(np.abs(Y.min()),np.abs(Y.mean()-1*Y.std()))
-        keep1_r =[]
+        residual_min_threshold = max(np.abs(Y.min()),np.abs(Y.mean()-3*Y.std()))
+        keep1_r = []
 
         # update according to movie dynamic range
         if residual.max() >= residual_min_threshold:
-            U_r, s_r, Vt_r = compute_svd(residual)
+            U_r, s_r, Vt_r = compute_svd(residual,
+                                        method='randomized',
+                                        n_components=5)
 
             if np.abs(s_r.max()) <= residual_min_threshold:
                 if verbose:
                     print('did not make the cut based on component variance') if verbose else 0
-                keep1_r=[]
+                keep1_r = []
             else:
                 ctid_r, _ = find_temporal_component(Vt_r,
                                                 confidence=confidence,
@@ -1091,7 +1107,6 @@ def greedy_component_denoiser(Y,
                 V_TF = np.vstack((V_TF, Vt_r[keep1_r,:]))
                 U_hat = np.hstack((U_hat, U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
 
-        #return
         if False:
             print('1109')
             uplot.plot_temporal_traces(V_init,V_hat=V_TF)
@@ -1100,13 +1115,12 @@ def greedy_component_denoiser(Y,
                 print(s_r[keep1_r])
                 uplot.plot_temporal_traces(Vt_r[keep1_r,:])
             print('Goodbye')
-
-            #return
+            return
     ##################
     ### Final update
     ##################
-    print('set en_true 1051')
-    plot_en = True
+    #print('set en_true 1051')
+    #plot_en = True
     print('*Final update after %d iterations'%run_count) if verbose else 0
     print('\tFinal update of temporal components') if verbose else 0
 
@@ -1344,7 +1358,7 @@ def denoise_components(data,
                                 ds=ds,
                                 dims=dims).T
 
-    U, s, Vt = compute_svd(data)
+    U, s, Vt = compute_svd(data,method='randomized',n_components=20)
 
     # if greedy Force x2 mean_th (store only big components)
     if greedy and (mean_th_factor <= 1.):
@@ -1405,7 +1419,20 @@ def denoise_components(data,
         Vt = Vt[keep1,:]
         U = U[:,keep1].dot(np.eye(len(keep1))*s[keep1.astype(int)])
 
-    # call greedy
+    ##############################################
+    ############# Check for low SNR components
+    ##############################################
+    snr_threshold = 0
+    snr_components = Vt.std(1)/denoise.noise_level(Vt) > snr_threshold
+
+    if any (snr_components):
+        Residual_components  = U[:,~snr_components].dot(Vt[~snr_components,:])
+        Vt = Vt[snr_components,:]
+        U  = U[:,snr_components]
+        data1 = data1- Residual_components
+    else:
+        Residual_components = 0
+
     if greedy:
         try:
             mean_th = mean_th*mean_th_factor2/mean_th_factor
@@ -1433,6 +1460,8 @@ def denoise_components(data,
             ctid[0,0] = 100
 
     Yd = U.dot(Vt) + mu
+    Yd = Yd + Residual_components
+
     #Yd = Yd*std
     return Yd, ctid
 

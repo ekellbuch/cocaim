@@ -43,7 +43,7 @@ def main(mov_in,
     gHalf = [2,2]
     range_ff=[0.25,0.5]
     nblocks = [6,6]
-    greedy = False
+    greedy = True
     dx = 1
     movie_length = 1000
     verbose = False
