@@ -26,10 +26,10 @@ def spatial(Y_new,
 def temporal(W,
              nblocks=[10,10],
              dx=1,
-             maxlag=5,
+             maxlag=3,
              confidence=0.99,
              greedy=False,
-             fudge_factor=0.99,
+             fudge_factor=1,
              mean_th_factor=1.15,
              U_update=False,
              min_rank=1,
@@ -71,6 +71,6 @@ def noise_level(mov_wf,
     #noise_level = noise_estimator.noise_estimator(mov_wf,method='logmexp')#[0]
 
     if ndim_ ==3:
-      noise_level =noise_level.reshape(dims_[:2], order='F')
+      noise_level = noise_level.reshape(dims_[:2], order='F')
 
     return noise_level

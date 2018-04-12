@@ -10,31 +10,34 @@ from math import ceil
 from functools import partial
 from itertools import product
 
+# compute single mean_th factor for all tiles
+
 def block_split_size(l, n):
-  """
-  For an array of length l that should be split into n sections,
-  calculate the dimension of each section:
-  l%n sub-arrays of size l//n +1 and the rest of size l//n
-  Input:
-  ------
-  l:      int
-          length of array
-  n:      int
-          number of section in which an array of size l
-          will be partitioned
-  Output:
-  ------
-  d:      np.array (n,)
-          length of each partitioned array.
-  """
-  d = np.zeros((n,)).astype('int')
-  cut = l%n
-  d[:cut] = l//n+1
-  d[cut:] = l//n
-  return d
+    """
+    For an array of length l that should be split into n sections,
+    calculate the dimension of each section:
+    l%n sub-arrays of size l//n +1 and the rest of size l//n
+    Input:
+    ------
+    l:      int
+            length of array
+    n:      int
+            number of section in which an array of size l
+            will be partitioned
+    Output:
+    ------
+    d:      np.array (n,)
+            length of each partitioned array.
+    """
+    d = np.zeros((n,)).astype('int')
+    cut = l%n
+    d[:cut] = l//n+1
+    d[cut:] = l//n
+    return d
 
 
-def split_image_into_blocks(image, nblocks=[10,10]):
+def split_image_into_blocks(image,
+                          nblocks=[10,10]):
     """
     Split an image into blocks.
 
@@ -71,14 +74,13 @@ def split_image_into_blocks(image, nblocks=[10,10]):
     return blocks
 
 
-def vector_offset(array,offset_factor=2):
+def vector_offset(array, offset_factor=2):
     """
     Given the dimenions of a matrix (dims), which was
     split row and column wise according to row_array,col_array,
     Calculate the offset in which to split the
     Inputs:
     -------
-
 
     Outputs:
     -------
@@ -99,8 +101,8 @@ def vector_offset(array,offset_factor=2):
 
 
 def tile_grids(dims,
-               nblocks=[10,10],
-               indiv_grids=True):
+               indiv_grids=True,
+               nblocks=[10,10]):
     """
     Input:
     ------
@@ -152,7 +154,11 @@ def tile_grids(dims,
     return array.astype('int')
 
 
-def offset_tiling_dims(dims,nblocks,offset_case=None):
+def offset_tiling_dims(dims,
+                      nblocks,
+                      offset_case=None):
+    """
+    """
     row_array, col_array = tile_grids(dims,nblocks)
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
@@ -188,7 +194,9 @@ def offset_tiling_dims(dims,nblocks,offset_case=None):
     return dims, indiv_dim
 
 
-def offset_tiling(W,nblocks=[10,10],offset_case=None):
+def offset_tiling(W,
+                  nblocks=[10,10],
+                  offset_case=None):
     """
     Given a matrix W, which was split row and column wise
     given row_cut,col_cut, calculate three off-grid splits
@@ -248,15 +256,15 @@ def offset_tiling(W,nblocks=[10,10],offset_case=None):
 
 
 def denoise_dx_tiles(W,
-                    nblocks=[10,10],
-                    dx=1,
-                    maxlag=5,
                     confidence=0.99,
-                    greedy=False,
+                    dx=1,
                     fudge_factor=0.99,
+                    greedy=False,
+                    maxlag=3,
                     mean_th_factor=1.15,
-                    U_update=False,
                     min_rank=1,
+                    nblocks=[10,10],
+                    U_update=False,
                     verbose=False,):
     """
     Given matrix W, denoise it according
@@ -310,6 +318,7 @@ def denoise_dx_tiles(W,
     dW_rs = combine_blocks(drs,
                         dW_rs,
                         list_order='C')
+
     W_cs, dcs = offset_tiling(W,
                             nblocks=nblocks,
                             offset_case='c')
@@ -324,6 +333,7 @@ def denoise_dx_tiles(W,
                                 U_update=U_update,
                                 verbose=verbose)
     del W_cs
+
     dims_cs = list(map(np.shape,dW_cs))
 
     dW_cs = combine_blocks(dcs,
@@ -344,6 +354,7 @@ def denoise_dx_tiles(W,
                                   U_update=U_update,
                                   verbose=verbose)
     del W_rcs
+
     dims_rcs = list(map(np.shape,dW_rcs))
 
     dW_rcs = combine_blocks(drcs,
@@ -447,16 +458,14 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
 
 
 def run_single(Y,
-              confidence=0.999,
+              confidence=0.99,
               debug = False,
               fudge_factor=0.99,
               greedy=False,
-              maxlag=5,
+              maxlag=3,
               mean_th_factor=1.15,
               min_rank=1,
               parallel=True,
-              stim_knots=None,
-              stim_delta=200,
               U_update=False,
               verbose=False
               ):
@@ -488,7 +497,7 @@ def run_single(Y,
         print('parallel version not for Darwin')
         parallel = False
 
-    start=time.time()
+    start = time.time()
 
     if parallel:
         cpu_count = max(1, multiprocessing.cpu_count()-2)
@@ -506,8 +515,6 @@ def run_single(Y,
                               mean_th=mean_th,
                               mean_th_factor=mean_th_factor,
                               min_rank=min_rank,
-                              stim_knots=stim_knots,
-                              stim_delta=stim_delta,
                               U_update=U_update,
                               verbose=verbose),
                               args)
@@ -527,8 +534,6 @@ def run_single(Y,
                             maxlag=maxlag,
                             mean_th_factor=mean_th_factor,
                             min_rank=min_rank,
-                            stim_knots=stim_knots,
-                            stim_delta=stim_delta,
                             U_update=U_update,
                             verbose=verbose)
           Yds[ii] = y_
@@ -542,16 +547,14 @@ def run_single(Y,
 
 
 def run_single_deprecated_v2(Y,
-            parallel=True,
-               maxlag=5,
                confidence=0.999,
-               greedy=False,
                fudge_factor=0.99,
+               greedy=False,
+               maxlag=5,
                mean_th_factor=1.15,
-               U_update=False,
                min_rank=1,
-               stim_knots=None,
-               stim_delta=200):
+                parallel=True,
+               U_update=False):
     """
     Run denoiser in each movie in the list Y.
     Inputs:
@@ -638,7 +641,6 @@ def run_single_deprecated_v2(Y,
 
             #Yds = #[out_[0] for out_ in c_out]
             #vtids = [out_[1] for out_ in c_out]
-
     else:
         Yds = [None]*len(Y)
         vtids = [None]*len(Y)
@@ -663,13 +665,13 @@ def run_single_deprecated_v2(Y,
 
 
 def run_single_deprecated(Y,
-               maxlag=5,
                confidence=0.999,
-               greedy=False,
                fudge_factor=0.99,
+               greedy=False,
+               maxlag=5,
                mean_th_factor=1.15,
-               U_update=False,
                min_rank=1,
+               U_update=False,
                stim_knots=None,
                stim_delta=200):
     """
@@ -761,7 +763,10 @@ def pyramid_matrix(dims,plot_en=False):
     return a_k
 
 
-def pyramid_tiles(dims_rs,dims_,list_order='C',plot_en=False):
+def pyramid_tiles(dims_rs,
+                  dims_,
+                  list_order='C',
+                  plot_en=False):
     """
     Calculate 2D array of size dims_rs,
     composed of pyramid matrices, each of which has the same
@@ -785,7 +790,11 @@ def pyramid_tiles(dims_rs,dims_,list_order='C',plot_en=False):
         a_k = pyramid_matrix(dim_)
         a_ks.append(a_k)
     # given W_rs and a_ks reconstruct array
-    a_k = combine_blocks(dims_rs[:2],a_ks,dims_,list_order=list_order)
+    a_k = combine_blocks(dims_rs[:2],
+                        a_ks,
+                        dims_,
+                        list_order=list_order)
+
     if plot_en:
         plt.figure(figsize=(10,10))
         plt.imshow(a_k)
@@ -815,8 +824,11 @@ def cn_ranks(dim_block, ranks, dims, list_order='C'):
     return Crank
 
 
-def combine_blocks(dimsM, Mc, dimsMc=None,
-        list_order='C', array_order='F'):
+def combine_blocks(dimsM,
+                  Mc,
+                  dimsMc=None,
+                  list_order='C',
+                  array_order='F'):
     """
     Combine blocks given by compress_blocks
 
@@ -881,12 +893,6 @@ def combine_blocks(dimsM, Mc, dimsMc=None,
                 i += d1c
                 j = 0
     return Mall
-
-############################################################
-################### VOXEL
-
-
-
 
 
 ####################
