@@ -115,7 +115,7 @@ def tile_grids(dims,
         d_row = block_split_size(dims[0],nblocks[0])
         d_col = block_split_size(dims[1],nblocks[1])
     else:
-        d_row,d_col=nblocks
+        d_row, d_col=nblocks
 
     if indiv_grids:
         d_row = np.insert(d_row,0,0)
@@ -134,7 +134,7 @@ def tile_grids(dims,
     array = np.zeros((number_of_blocks,2))
 
     for ii,row in enumerate(product(d_row,d_col)):
-        array[ii]=row
+        array[ii] = row
 
     """
     # for each row
@@ -159,7 +159,8 @@ def offset_tiling_dims(dims,
                       offset_case=None):
     """
     """
-    row_array, col_array = tile_grids(dims,nblocks)
+    row_array, col_array = tile_grids(dims,
+                                    nblocks=nblocks)
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
 
@@ -221,7 +222,8 @@ def offset_tiling(W,
 
     #r_offset,c_offset = extract_4dx_grid(dims,row_array,col_array)
     dims=W.shape
-    row_array,col_array = tile_grids(dims,nblocks)
+    row_array,col_array = tile_grids(dims,
+                                    nblocks=nblocks)
 
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
@@ -387,7 +389,8 @@ def combine_4xd(nblocks,dW_,dW_rs,dW_cs,dW_rcs,dims_,dims_rs,dims_cs,dims_rcs,pl
     -------
     """
     dims = dW_.shape
-    row_array,col_array = tile_grids(dims,nblocks)
+    row_array,col_array = tile_grids(dims,
+                                    nblocks=nblocks)
 
     r_offset = vector_offset(row_array)
     c_offset = vector_offset(col_array)
@@ -490,9 +493,9 @@ def run_single(Y,
       vtids = np.zeros((len(Y),))
       return Y, vtids
 
-      mean_th = wnoise_acov_CI(Y[0].shape[2],
-                               confidence=confidence,
-                               maxlag=maxlag)
+    mean_th = gpca.wnoise_acov_CI(Y[0].shape[2],
+                             confidence=confidence,
+                             maxlag=maxlag)
     if sys.platform == 'darwin':
         print('parallel version not for Darwin')
         parallel = False
@@ -532,6 +535,7 @@ def run_single(Y,
                             fudge_factor=fudge_factor,
                             greedy=greedy,
                             maxlag=maxlag,
+                            mean_th=mean_th,
                             mean_th_factor=mean_th_factor,
                             min_rank=min_rank,
                             U_update=U_update,
@@ -976,7 +980,8 @@ def test_off_grids(mov_nn, nblocks=[10,10]):
   dW_rcs = combine_blocks(drcs,
                           dW_rcs,
                           list_order='C')
-  row_array,col_array = tile_grids(dims,nblocks)
+  row_array,col_array = tile_grids(dims,
+                                  nblocks=nblocks)
 
   r_offset = vector_offset(row_array)
   c_offset = vector_offset(col_array)

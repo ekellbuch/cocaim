@@ -634,7 +634,8 @@ def tiling_grid_plot(W,
     """
     """
     dims = W.shape
-    col_array, row_array = tgrid.tile_grids(dims, nblocks)
+    col_array, row_array = tgrid.tile_grids(dims,
+                                        nblocks=nblocks)
     x, y = np.meshgrid(row_array, col_array)
     if plot_option == 'var':
         Cn1 = W.var(2)
