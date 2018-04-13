@@ -25,7 +25,6 @@ import denoise
 #import trefide_old
 import util_plot as uplot
 import tools as tools_
-import noise_estimator
 from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 
@@ -514,6 +513,8 @@ def denoise_patch(M,
     rlen:       int
                 sum of the ranks of all tiles
     """
+    if False:
+        return M, 1
     ndim = np.ndim(M)
 
     if np.ndim(M) ==3:
@@ -747,10 +748,15 @@ def greedy_temporal_denoiser(Y,
         idx_ = np.setdiff1d(np.arange(num_components), ii)
         R_ = Y - U_hat_[:,idx_].dot(V_TF_2[idx_,:])
         V_ = U_hat_[:,ii].T.dot(R_)/norm_U2[ii]
-
+        print('ii %d'%ii)
+        print('lambda')
+        print(lambda_)
+                
         norm_Vnew = np.linalg.norm(V_, 2)
         norm_Vdiff = np.linalg.norm(V_TF_2[ii,:]-V_, 2)
 
+        plt.plot(V_)
+        plt.show()
         if norm_Vdiff/norm_Vnew >= 1:
             continue
 
@@ -758,11 +764,13 @@ def greedy_temporal_denoiser(Y,
             continue
 
         if lambda_ is None:
+            print('run wo lambda for %d'%ii)
             V_2 = l1tf_constrained(V_,
                                 solver=solver,
                                 verbose=False
                                 )[0]
         else:
+            print('run w lambda for %d'%ii)
             clambda = lambda_[ii]
 
             if clambda == 0:
@@ -778,16 +786,22 @@ def greedy_temporal_denoiser(Y,
             else:
                 print('error')
             V_2 = l1tf_lagrangian(V_,
-                                lambda_=clambda,
-                                solver=solver,
-                                solver_obj=solver_obj[ii]
+                                lambda_ = clambda,
+                                solver = solver,
+                                solver_obj = solver_obj[ii]
                                 )
         V_TF_2[ii,:] = V_2
 
+        print('768')
+        print('ii %d'%ii)
+        plt.plot(V_)
+        plt.plot(V_2)
+        plt.show()
     if plot_en:
         uplot.plot_temporal_traces(V_TF_, V_hat=V_TF_2)
 
     return V_TF_2
+
 
 def greedy_component_denoiser(Y,
                               U_hat,
@@ -947,6 +961,7 @@ def greedy_component_denoiser(Y,
             ######################
             ## normalize V by norm 2
             ######################
+            V_TF_old = V_TF
             V_TF = V_TF/norm_Vinit
 
             _, _ = component_norm(V_TF,
@@ -1129,6 +1144,7 @@ def greedy_component_denoiser(Y,
                 else:
                     rerun_1 = 1
                     run_count +=1
+                    print('added')
                     V_TF = np.vstack((V_TF, Vt_r[keep1_r,:]))
                     U_hat = np.hstack((U_hat, U_r[:,keep1_r].dot(np.diag(s_r[keep1_r]))))
 
@@ -1142,6 +1158,7 @@ def greedy_component_denoiser(Y,
                 uplot.plot_temporal_traces(Vt_r[keep1_r,:])
             print('Goodbye')
             return
+
     ##################
     ### Final update
     ##################
@@ -1149,11 +1166,14 @@ def greedy_component_denoiser(Y,
     print('*Final update after %d iterations'%run_count) if verbose else 0
     print('\tFinal update of temporal components') if verbose else 0
 
+
     V_TF = greedy_temporal_denoiser(Y,
                                     U_hat,
                                     V_TF,
                                     solver=solver
                                     )
+    V_TF = V_TF/np.sqrt(np.sum(V_TF**2,1))[:,np.newaxis]
+
     if plot_en:
         uplot.plot_temporal_traces(V_init, V_hat=V_TF)
 
@@ -1306,8 +1326,8 @@ def denoise_components(data,
                         min_rank=0,
                         plot_en=False,
                         solver='trefide',
-                        snr_components_flag=False,
-                        snr_threshold = 2,
+                        snr_components_flag=True,
+                        snr_threshold = 2.0,
                         tsub=1,
                         U_update=False,
                         verbose=False):
@@ -1371,7 +1391,7 @@ def denoise_components(data,
     mu = data.mean(1, keepdims=True)
     #std = data.std(1,keepdims=True)
     #data = (data - mu)/std
-    data1 = data.copy()
+    data1 = data - mu
 
     # spatially decimate the data
     if ds > 1:
@@ -1451,7 +1471,7 @@ def denoise_components(data,
         Residual_components  = U[:,~snr_components].dot(Vt[~snr_components,:])
         Vt = Vt[snr_components,:]
         U  = U[:,snr_components]
-        data1 = data1- Residual_components
+        data1 = data1 - Residual_components
     else:
         Residual_components = 0
 
@@ -1474,23 +1494,25 @@ def denoise_components(data,
                                             U_update=U_update,
                                             verbose=verbose)
 
-            ctid[0,np.arange(Vt.shape[0]+1)] = 1
+            ctid[0,np.arange(Vt.shape[0])] = 1
 
         except:
             print('\tERROR: Greedy solving failed, keeping %d parameters'%
                     (len(keep1)))
             ctid[0, 0] = 100
 
-    Yd = U.dot(Vt) + mu
+    Yd = U.dot(Vt)
     #Yd = Yd*std
 
     # include components with low SNR
     if snr_components_flag and any (~snr_components):
-        ctid[0, np.arange(Vt.shape[0]+1+np.sum(~snr_components))] = 1
+        ctid[0, np.arange(Vt.shape[0]+np.sum(~snr_components))] = 1
         Yd = Yd + Residual_components
     else:
         ctid[0,(Vt.shape[0]+1):] = np.nan
         ctid[0,:(Vt.shape[0]+1)] = 1
+
+    Yd+= mu
     return Yd, ctid
 
 

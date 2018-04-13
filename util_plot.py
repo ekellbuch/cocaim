@@ -166,7 +166,9 @@ def cn_ranks_dx_plot(ranks,
                     figsize=15,
                     fontsize=20,
                     tile_err=100,
-                    include_err=True):
+                    include_err=True,
+                    save_fig=False,
+                   save_fig_name='dx_rank_plot'):
     rtype=[None,'r','c','rc']
     for ii,rank in enumerate(ranks):
         if not include_err:
@@ -178,7 +180,9 @@ def cn_ranks_dx_plot(ranks,
                   nblocks=nblocks,
                   offset_case=rtype[ii],
                      figsize=figsize,
-                     fontsize=fontsize)
+                     fontsize=fontsize,
+                     save_fig=save_fig,
+                     save_fig_name=save_fig_name)
     return
 
 
@@ -190,7 +194,9 @@ def cn_ranks_plot(ranks,
                   exclude_max=True,
                   max_rank=100,
                  fontsize=20,
-                 figsize=15):
+                 figsize=15,
+                 save_fig_name='',
+                 save_fig=False):
     """
     Plot rank array given ranks of individual tiles,
     and tile coordinates.
@@ -265,7 +271,11 @@ def cn_ranks_plot(ranks,
         ax3.text(row_val + rows[ii] / 2, col_val +
                  cols[ii] / 2, c, va='center', ha='center',fontsize=fontsize)
     plt.tight_layout()
+    if save_fig:
+        save_fig_name = 'ranks_plot_'+save_fig_name+'.pdf'
+        plt.savefig(save_fig_name)
     plt.show()
+    
     return Cplot3
 
 
@@ -467,7 +477,9 @@ def comparison_plot(cn_see,
                     share_colorbar=False,
                     plot_colormap='jet',
                     plot_num_samples=1000,
-                    cbar_ticks_number=None):
+                    cbar_ticks_number=None,
+                   save_fig=False,
+                   save_fig_name='corr_'):
     """
     """
     if share_colorbar:
@@ -519,9 +531,9 @@ def comparison_plot(cn_see,
             Cn =array - array.min()
             Cn = Cn/Cn.max()
             title_prefix = 'Single Frame: '
-        #print ('%s range [%.1e %.1e]'%(title_prefix,
-        #                           Cn.min(),
-        #                           Cn.max()))
+        print ('%s range [%.1e %.1e]'%(title_prefix,
+                                   Cn.min(),
+                                   Cn.max()))
         Cn_all.append(Cn)
 
     #######################
@@ -574,7 +586,9 @@ def comparison_plot(cn_see,
 
 
     plt.tight_layout()
-    #plt.savefig('cosyne_comparison_single_frame_vertical.svg')
+    if save_fig:
+        save_fig_name = 'comparison_plot_'+save_fig_name+'.pdf'
+        plt.savefig(save_fig_name)
     plt.show()
     return
 
