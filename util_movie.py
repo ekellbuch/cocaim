@@ -16,7 +16,7 @@ def movie_writer(mov,
                 fname_out_movie,
                 video_length,
                 min_unit=255,
-                 ax_concat=2,
+                 ax_concat=1,
                 min_single_frame=False):
 
     # Truncate movie

@@ -168,9 +168,10 @@ def cn_ranks_dx_plot(ranks,
                     tile_err=100,
                     include_err=True,
                     save_fig=False,
-                   save_fig_name='dx_rank_plot'):
+                   save_fig_name=''):
     rtype=[None,'r','c','rc']
     for ii,rank in enumerate(ranks):
+        cname_= save_fig_name+'_offset_'+str(rtype[ii])+'_'
         if not include_err:
             rank=rank%tile_err
             rank[rank==0]=1
@@ -182,7 +183,7 @@ def cn_ranks_dx_plot(ranks,
                      figsize=figsize,
                      fontsize=fontsize,
                      save_fig=save_fig,
-                     save_fig_name=save_fig_name)
+                     save_fig_name=cname_)
     return
 
 
@@ -272,10 +273,11 @@ def cn_ranks_plot(ranks,
                  cols[ii] / 2, c, va='center', ha='center',fontsize=fontsize)
     plt.tight_layout()
     if save_fig:
-        save_fig_name = 'ranks_plot_'+save_fig_name+'.pdf'
+        save_fig_name = save_fig_name+'ranks_plot.pdf'
         plt.savefig(save_fig_name)
-    plt.show()
-    
+    else:
+        plt.show()
+
     return Cplot3
 
 
@@ -587,9 +589,10 @@ def comparison_plot(cn_see,
 
     plt.tight_layout()
     if save_fig:
-        save_fig_name = 'comparison_plot_'+save_fig_name+'.pdf'
+        save_fig_name = save_fig_name+'comparison_plot_'+'.pdf'
         plt.savefig(save_fig_name)
-    plt.show()
+    else:
+        plt.show()
     return
 
 
@@ -702,3 +705,4 @@ def spatial_filter_spixel_plot(data,y_hat,hat_k):
     plt.tight_layout()
     plt.show()
     return
+
