@@ -12,6 +12,6 @@ Dataset from https://github.com/simonsfoundation/CaImAn
 
 ## Dependencies
 Dependencies:
-1. [Trefide] (https://github.com/ikinsella/trefide) - follow setup instructions to avoid using CVXPY (which doesn't scale linearly).
+1. [Trefide](https://github.com/ikinsella/trefide) - follow setup instructions to avoid using CVXPY (which doesn't scale linearly).
 2. [CVXPY](https://cvxgrp.github.io/cvxpy/install/index.html) - follow their setup instructions, however on Ubuntu and Py3.6 I found that I first needed to use conda to install blas and lapack as described in the last comment [here](https://github.com/cvxgrp/cvxpy/issues/357). 
-3. [CVXOPT] (http://cvxopt.org/). Test installation with:https://scaron.info/blog/linear-programming-in-python-with-cvxopt.html/
+3. [CVXOPT](http://cvxopt.org/). Test installation with:https://scaron.info/blog/linear-programming-in-python-with-cvxopt.html/
