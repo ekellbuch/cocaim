@@ -28,14 +28,15 @@ def spatial(Y_new,
 
 
 def temporal(W,
-             confidence=0.99,
+             confidence=0.999,
              dx=1,
              fudge_factor=1,
              greedy=False,
-             maxlag=5,
-             mean_th_factor=1.15,
+             maxlag=3,
+             mean_th_factor=1.5,
              min_rank=1,
              nblocks=[10,10],
+             snr_threshold=2,
              U_update=False,
              verbose=False):
     """
@@ -51,6 +52,7 @@ def temporal(W,
                                               mean_th_factor=mean_th_factor,
                                               min_rank=min_rank,
                                               nblocks=nblocks,
+                                              snr_threshold=snr_threshold,
                                               U_update=U_update,
                                               verbose=verbose)
     #print('Temporal denoiser run for %.3f sec'%(time.time()-start))

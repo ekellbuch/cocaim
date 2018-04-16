@@ -440,6 +440,7 @@ def denoise_patch(M,
                 noise_norm=False,
                 plot_en=False,
                 share_th=True,
+                snr_threshold=2.0,
                 tfide=False,
                 tfilt=False,
                 tsub=1,
@@ -538,6 +539,7 @@ def denoise_patch(M,
                                    mean_th_factor=mean_th_factor,
                                    min_rank=min_rank,
                                    plot_en=plot_en,
+                                   snr_threshold=snr_threshold,
                                   tsub=tsub,
                                    U_update=U_update,
                                    verbose=verbose
@@ -622,7 +624,7 @@ def l1tf_lagrangian(V_,
             if solver_obj is None:
                 solver_obj = TrendFilter(len(V_))
             solver_obj.lambda_ = lambda_
-            V_TF = solver_obj.denoise(V_,
+            V_TF = solver_obj.denoise(np.double(V_),
                                         refit=False)
 
         except:
@@ -1242,6 +1244,7 @@ def find_temporal_component(Vt,
                        mean_th=mean_th)
 
     # Plot temporal correlations
+    #print('1245')
     if plot_en:
         keep1 = np.where(np.logical_or(ctid[0, :] == 1,
                         ctid[1, :] == 1))[0]
@@ -1324,11 +1327,11 @@ def denoise_components(data,
                         max_num_iters=20,
                         mean_th=None,
                         mean_th_factor=1.,
-                        mean_th_factor2=1.15,
-                        min_rank=0,
+                        mean_th_factor2=1.5,
+                        min_rank=1,
                         plot_en=False,
                         solver='trefide',
-                        snr_components_flag=True,
+                        snr_components_flag=False,
                         snr_threshold = 2.0,
                         tsub=1,
                         U_update=False,
@@ -1393,7 +1396,7 @@ def denoise_components(data,
     mu = data.mean(1, keepdims=True)
     #std = data.std(1,keepdims=True)
     #data = (data - mu)/std
-    data1 = data - mu
+    data = data - mu
 
     # spatially decimate the data
     if ds > 1:
@@ -1419,7 +1422,7 @@ def denoise_components(data,
                                     )
 
     keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-
+    #print(keep1)
     # If no components to store, change to lower confidence level
     if np.all(keep1 == np.nan):
         print("Change to lower confidence level") if verbose else 0
@@ -1435,7 +1438,6 @@ def denoise_components(data,
                                                 )
 
         keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
-        #uplot.plot_vt_cov(Vt,keep1,maxlag) if plot_en else 0
 
     # If no components to store, exit & return min rank
     if np.all(keep1 == np.nan):
@@ -1445,14 +1447,14 @@ def denoise_components(data,
             min_rank = min_rank+1
             print('Forcing %d component(s)'%min_rank) if verbose else 0
             ctid[0, :min_rank]=1
-            S =np.eye(min_rank)*s[:min_rank]
+            S = np.eye(min_rank)*s[:min_rank]
             U = U[:,:min_rank]
             Vt = S.dot(Vt[:min_rank,:])
-            Yd = U.dot(Vt)
         Yd += mu
         #Yd*= std
         return Yd, ctid
 
+    # Select components
     if decimation_flag:
         U, Vt = decimation_interpolation(data,
                                         dims=dims,
@@ -1461,29 +1463,35 @@ def denoise_components(data,
                                         tsub=tsub
                                         )
     else:
-        # Select components
-        S = np.eye(len(keep1))*s[keep1.astype(int)]
-        Vt = Vt[keep1,:]
+        S = np.diag(s[keep1])
+        Vt = S.dot(Vt[keep1,:])
         U = U[:,keep1]
-        Vt = S.dot(Vt)
-
     ##############################################
     ############# Check for low SNR components
     ##############################################
-    snr_components = Vt.std(1)/denoise.noise_level(Vt) > snr_threshold
 
-    if any (~snr_components):
-        Residual_components  = U[:,~snr_components].dot(Vt[~snr_components,:])
-        Vt = Vt[snr_components,:]
-        U  = U[:,snr_components]
-        data1 = data1 - Residual_components
-    else:
+    n_comp, T = Vt.shape
+
+    high_snr_components = Vt.std(1)/denoise.noise_level(Vt) > snr_threshold
+    num_low_snr_components = np.sum(~high_snr_components)
+    print(num_low_snr_components)
+
+    if num_low_snr_components > 0: # low SNR components
+        if num_low_snr_components == n_comp: # all components are low SNR
+            greedy = False
+            Residual_components = 0
+        else:
+            Residual_components  = U[:,~high_snr_components].dot(Vt[~high_snr_components,:])
+            Vt = Vt[high_snr_components,:]
+            U  = U[:,high_snr_components]
+    else: # al components are high SNR
         Residual_components = 0
+
 
     if greedy:
         try:
             mean_th = mean_th*mean_th_factor2/mean_th_factor
-            U, Vt = greedy_component_denoiser(data1,
+            U, Vt = greedy_component_denoiser(data - Residual_components,
                                             U,
                                             Vt,
                                             confidence=confidence,
@@ -1508,15 +1516,34 @@ def denoise_components(data,
 
     Yd = U.dot(Vt)
 
-    # include components with low SNR
-    if snr_components_flag and any (~snr_components):
-        ctid[0, np.arange(Vt.shape[0]+np.sum(~snr_components))] = 1
-        Yd = Yd + Residual_components
-    else:
-        ctid[0,(Vt.shape[0]+1):] = np.nan
-        ctid[0,:(Vt.shape[0]+1)] = 1
+    n_comp, T = Vt.shape
 
-    Yd+= mu
+    # include components with low SNR
+    #snr_components_flag = False
+    if snr_components_flag and (num_low_snr_components>0):
+        Yd += Residual_components
+        n_comp += num_low_snr_components
+        print('low SNR')
+        print(num_low_snr_components)
+        print('setting for output with low SNR') if verbose else 0
+        #print(Vt.shape[0]+num_low_snr_components)
+    else:
+        print('setting for output without low SNR') if verbose else 0
+
+    if n_comp < min_rank:
+        print('adding a rank %d input'%(min_rank-n_comp)) if verbose else 0
+
+        Rextra  = compute_svd(data-Yd,
+                            method='randomized',
+                            n_components=min_rank-n_comp,
+                            reconstruct=True)
+        n_comp = min_rank
+        Yd += Rextra
+
+    ctid[0,n_comp:] = np.nan
+    ctid[0,:n_comp] = 1
+
+    Yd += mu
     return Yd, ctid
 
 
@@ -1546,7 +1573,7 @@ def c_l1tf_v_hat(v,
         print('Do not denoise (high SNR: noise_level=%.3e)'%
                 sigma) if verbose else 0
         return v , 0
-    
+
     T = len(v)
     v_hat = cp.Variable(T)
     #print(sigma*np.sqrt(T)) if verbose else 0

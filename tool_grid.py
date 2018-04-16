@@ -268,6 +268,7 @@ def denoise_dx_tiles(W,
                     mean_th_factor=1.15,
                     min_rank=1,
                     nblocks=[10,10],
+                    snr_threshold=2,
                     U_update=False,
                     verbose=False):
     """
@@ -296,6 +297,7 @@ def denoise_dx_tiles(W,
                             maxlag=maxlag,
                             mean_th_factor=mean_th_factor,
                             min_rank=min_rank,
+                            snr_threshold=snr_threshold,
                             U_update=U_update,
                             verbose=verbose)
     del W_
@@ -327,6 +329,7 @@ def denoise_dx_tiles(W,
                                 maxlag=maxlag,
                                 mean_th_factor=mean_th_factor,
                                 min_rank=min_rank,
+                                snr_threshold=snr_threshold,
                                 U_update=U_update,
                                 verbose=verbose)
     del W_rs
@@ -354,6 +357,7 @@ def denoise_dx_tiles(W,
                                 maxlag=maxlag,
                                 mean_th_factor=mean_th_factor,
                                 min_rank=min_rank,
+                                snr_threshold=snr_threshold,
                                 U_update=U_update,
                                 verbose=verbose)
     del W_cs
@@ -382,6 +386,7 @@ def denoise_dx_tiles(W,
                                   maxlag=maxlag,
                                   mean_th_factor=mean_th_factor,
                                   min_rank=min_rank,
+                                  snr_threshold=snr_threshold,
                                   U_update=U_update,
                                   verbose=verbose)
     del W_rcs
@@ -499,6 +504,7 @@ def run_single(Y,
               mean_th_factor=1.15,
               min_rank=1,
               parallel=True,
+              snr_threshold=2,
               U_update=False,
               verbose=False
               ):
@@ -548,6 +554,7 @@ def run_single(Y,
                               mean_th=mean_th,
                               mean_th_factor=mean_th_factor,
                               min_rank=min_rank,
+                              snr_threshold=snr_threshold,
                               U_update=U_update,
                               verbose=verbose),
                               args)
@@ -570,6 +577,7 @@ def run_single(Y,
                             mean_th=mean_th,
                             mean_th_factor=mean_th_factor,
                             min_rank=min_rank,
+                            snr_threshold=snr_threshold,
                             U_update=U_update,
                             verbose=verbose)
             #else:
