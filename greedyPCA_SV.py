@@ -25,7 +25,7 @@ import denoise
 #import trefide_old
 import util_plot as uplot
 import tools as tools_
-from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
+#from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 
 # turn off option for computing mean_th one at a time
@@ -628,15 +628,16 @@ def l1tf_lagrangian(V_,
                                         refit=False)
 
         except:
-            if verbose:
-                print('PDAS failed. try IPM')
-            V_TF = l1_tf(V_,
-                        lambda_,
-                        False,
-                        1000,
-                        0)
-            if verbose:
-                print('solved w cython')
+            #if verbose:
+            print('PDAS failed -- not denoising')
+            pass
+            #    V_TF = l1_tf(V_,
+            #            lambda_,
+            #            False,
+            #            1000,
+            #            0)
+            #if verbose:
+            #    print('solved w cython')
 
     elif solver == 'cvxpy':
         V_TF = c_update_V(V_,
@@ -1324,10 +1325,11 @@ def denoise_components(data,
                         fudge_factor=1.,
                         greedy=True,
                         maxlag=5,
+                        max_num_components=30,
                         max_num_iters=20,
                         mean_th=None,
                         mean_th_factor=1.,
-                        mean_th_factor2=1.5,
+                        mean_th_factor2=1.15,
                         min_rank=1,
                         plot_en=False,
                         solver='trefide',
@@ -1405,7 +1407,9 @@ def denoise_components(data,
                                 ds=ds,
                                 dims=dims).T
 
-    U, s, Vt = compute_svd(data)#, method='randomized',n_components=20)
+    U, s, Vt = compute_svd(data,
+                           method='randomized',
+                           n_components=max_num_components)
 
     # if greedy Force x2 mean_th (store only big components)
     if greedy and (mean_th_factor <= 1.):
@@ -1450,6 +1454,7 @@ def denoise_components(data,
             S = np.eye(min_rank)*s[:min_rank]
             U = U[:,:min_rank]
             Vt = S.dot(Vt[:min_rank,:])
+        Yd = U.dot(Vt)
         Yd += mu
         #Yd*= std
         return Yd, ctid
@@ -1474,7 +1479,7 @@ def denoise_components(data,
 
     high_snr_components = Vt.std(1)/denoise.noise_level(Vt) > snr_threshold
     num_low_snr_components = np.sum(~high_snr_components)
-    print(num_low_snr_components)
+    #print(num_low_snr_components)
 
     if num_low_snr_components > 0: # low SNR components
         if num_low_snr_components == n_comp: # all components are low SNR
@@ -1523,8 +1528,8 @@ def denoise_components(data,
     if snr_components_flag and (num_low_snr_components>0):
         Yd += Residual_components
         n_comp += num_low_snr_components
-        print('low SNR')
-        print(num_low_snr_components)
+        #print('low SNR')
+        #print(num_low_snr_components)
         print('setting for output with low SNR') if verbose else 0
         #print(Vt.shape[0]+num_low_snr_components)
     else:

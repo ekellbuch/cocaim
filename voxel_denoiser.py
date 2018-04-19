@@ -42,6 +42,7 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
                             mean_th_factor=1.15,
                              min_rank=1,
                             nblocks=[10,10],
+                            snr_threshold=2,
                             U_update=False):
 
 
@@ -66,6 +67,7 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
                                                             min_rank=min_rank,
                                                             nblocks=nblocks,
                                                             offset_case=None,
+                                                            snr_threshold=snr_threshold,
                                                             U_update=U_update)
 
     if dx == 1:
@@ -81,6 +83,7 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
                                                             min_rank=min_rank,
                                                             nblocks=nblocks,
                                                             offset_case='r',
+                                                            snr_threshold=snr_threshold,
                                                             U_update=U_update)
 
 
@@ -94,6 +97,7 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
                                                             min_rank=min_rank,
                                                             nblocks=nblocks,
                                                             offset_case='c',
+                                                            snr_threshold=snr_threshold,
                                                             U_update=U_update)
 
 
@@ -107,6 +111,7 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
                                                             min_rank=min_rank,
                                                             nblocks=nblocks,
                                                             offset_case='rc',
+                                                            snr_threshold=snr_threshold,
                                                             U_update=U_update)
     W_four_1 = combine_4xd(nblocks,
                          dW_1,
@@ -153,6 +158,7 @@ def denoise_voxel_tiling(W1,W2,W3,
                          nblocks=[10,10],
                          offset_case=None,
                          reconstruct=True,
+                         snr_threshold=2,
                          U_update=False):
     """
 
@@ -184,6 +190,7 @@ def denoise_voxel_tiling(W1,W2,W3,
                     greedy=greedy,
                     maxlag=maxlag,
                     mean_th_factor=mean_th_factor,
+                            snr_threshold=snr_threshold,
                    U_update=U_update)
 
 
