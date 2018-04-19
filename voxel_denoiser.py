@@ -33,18 +33,16 @@ def deinterleave_3D(cc):
 
 
 def denoise_dx_voxel_tiling(W1,W2,W3,
-                             nblocks=[10,10],
-                             dx=1,
-                             maxlag=5,
-                             confidence=0.99,
-                             greedy=False,
+                            confidence=0.99,
+                            dx=1,
                              fudge_factor=0.99,
-                             mean_th_factor=1.15,
-                             U_update=False,
-                             min_rank=1,
+                             greedy=False,
                             interleave=False,
-                             stim_knots=None,
-                             stim_delta=200):
+                            maxlag=5,
+                            mean_th_factor=1.15,
+                             min_rank=1,
+                            nblocks=[10,10],
+                            U_update=False):
 
 
     """
@@ -59,66 +57,57 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
 
     
     dW_1, dW_2, dW_3, rank_W_, dims_ = denoise_voxel_tiling(W1,W2,W3,
+                                                             confidence=confidence,
+                                                            greedy = greedy,
+                                                             fudge_factor=fudge_factor,
+                                                            interleave=interleave,
+                                                             maxlag=maxlag,
+                                                             mean_th_factor=mean_th_factor,
+                                                            min_rank=min_rank,
                                                             nblocks=nblocks,
                                                             offset_case=None,
-                                                             interleave=interleave,
-                                                             maxlag=maxlag,
-                                                             confidence=confidence,
-                                                             greedy = greedy,
-                                                             fudge_factor=fudge_factor,
-                                                             mean_th_factor=mean_th_factor,
-                                                             U_update=U_update,
-                                                             min_rank=min_rank,
-                                                             stim_knots=stim_knots,
-                                                             stim_delta = stim_delta)
+                                                            U_update=U_update)
 
     if dx == 1:
         return dW_1, dW_2, dW_3, rank_W_
 
     dW_rs1, dW_rs2, dW_rs3, rank_W_rs, dims_rs = denoise_voxel_tiling(W1,W2,W3,
-                                                                     nblocks=nblocks,
-                                                                      offset_case='r',
-                                                                     interleave=interleave,
-                                                                     maxlag=maxlag,
-                                                                     confidence=confidence,
-                                                                     greedy = greedy,
-                                                                     fudge_factor=fudge_factor,
-                                                                     mean_th_factor=mean_th_factor,
-                                                                     U_update=U_update,
-                                                                     min_rank=min_rank,
-                                                                     stim_knots=stim_knots,
-                                                                     stim_delta = stim_delta)
+                                                             confidence=confidence,
+                                                            greedy = greedy,
+                                                             fudge_factor=fudge_factor,
+                                                            interleave=interleave,
+                                                             maxlag=maxlag,
+                                                             mean_th_factor=mean_th_factor,
+                                                            min_rank=min_rank,
+                                                            nblocks=nblocks,
+                                                            offset_case='r',
+                                                            U_update=U_update)
 
 
     dW_cs1, dW_cs2, dW_cs3, rank_W_cs, dims_cs = denoise_voxel_tiling(W1,W2,W3,
-                                                                     nblocks=nblocks,
-                                                                      offset_case='c',
-                                                                     interleave=interleave,
-                                                                     maxlag=maxlag,
-                                                                     confidence=confidence,
-                                                                     greedy = greedy,
-                                                                     fudge_factor=fudge_factor,
-                                                                     mean_th_factor=mean_th_factor,
-                                                                     U_update=U_update,
-                                                                     min_rank=min_rank,
-                                                                     stim_knots=stim_knots,
-                                                                     stim_delta = stim_delta)
+                                                             confidence=confidence,
+                                                            greedy = greedy,
+                                                             fudge_factor=fudge_factor,
+                                                            interleave=interleave,
+                                                             maxlag=maxlag,
+                                                             mean_th_factor=mean_th_factor,
+                                                            min_rank=min_rank,
+                                                            nblocks=nblocks,
+                                                            offset_case='c',
+                                                            U_update=U_update)
 
 
     dW_rcs1, dW_rcs2, dW_rcs3, rank_W_rcs, dims_rcs = denoise_voxel_tiling(W1,W2,W3,
-                                                                     nblocks=nblocks,
-                                                                        offset_case='rc',
-                                                                     interleave=interleave,
-                                                                     maxlag=maxlag,
-                                                                     confidence=confidence,
-                                                                     greedy = greedy,
-                                                                     fudge_factor=fudge_factor,
-                                                                     mean_th_factor=mean_th_factor,
-                                                                     U_update=U_update,
-                                                                     min_rank=min_rank,
-                                                                     stim_knots=stim_knots,
-                                                                     stim_delta = stim_delta)
-
+                                                             confidence=confidence,
+                                                            greedy = greedy,
+                                                             fudge_factor=fudge_factor,
+                                                            interleave=interleave,
+                                                             maxlag=maxlag,
+                                                             mean_th_factor=mean_th_factor,
+                                                            min_rank=min_rank,
+                                                            nblocks=nblocks,
+                                                            offset_case='rc',
+                                                            U_update=U_update)
     W_four_1 = combine_4xd(nblocks,
                          dW_1,
                          dW_rs1,
@@ -153,21 +142,18 @@ def denoise_dx_voxel_tiling(W1,W2,W3,
 
 
 def denoise_voxel_tiling(W1,W2,W3,
+                         confidence=0.9,
                          dims=None,
-                         nblocks=[10,10],
-                         offset_case=None,
+                         fudge_factor=1,
+                         greedy = False,
                          interleave=False,
                          maxlag=5,
-                         confidence=0.9,
-                         greedy = False,
-                         fudge_factor=1,
                          mean_th_factor=1.25,
-                         U_update=False,
                          min_rank=1,
-                         stim_knots=None,
-                         stim_delta = 200,
+                         nblocks=[10,10],
+                         offset_case=None,
                          reconstruct=True,
-                        ):
+                         U_update=False):
     """
 
     """
@@ -193,15 +179,12 @@ def denoise_voxel_tiling(W1,W2,W3,
         args = [np.concatenate(ps,axis=0) for ii,ps in enumerate(zip(W1,W2,W3))]
 
     Yds, vtids = run_single(args,
-                   maxlag=maxlag,
                    confidence=confidence,
-                   greedy=greedy,
                    fudge_factor=fudge_factor,
-                   mean_th_factor=mean_th_factor,
-                   U_update=U_update,
-                   min_rank=min_rank,
-                   stim_knots=stim_knots,
-                   stim_delta=stim_delta)
+                    greedy=greedy,
+                    maxlag=maxlag,
+                    mean_th_factor=mean_th_factor,
+                   U_update=U_update)
 
 
     if interleave:
@@ -216,8 +199,8 @@ def denoise_voxel_tiling(W1,W2,W3,
     dW3_cs = [a_[2] for a_ in a]
 
     if reconstruct:
-        dW1_cs = combine_blocks(dims,dW1_cs,list_order='C')
-        dW2_cs = combine_blocks(dims,dW2_cs,list_order='C')
-        dW3_cs = combine_blocks(dims,dW3_cs,list_order='C')
+        dW1_cs = combine_blocks(dims, dW1_cs, list_order='C')
+        dW2_cs = combine_blocks(dims, dW2_cs, list_order='C')
+        dW3_cs = combine_blocks(dims, dW3_cs, list_order='C')
 
     return dW1_cs,dW2_cs,dW3_cs,vtids,dims_

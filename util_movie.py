@@ -16,7 +16,8 @@ def movie_writer(mov,
                 fname_out_movie,
                 video_length,
                 min_unit=255,
-                min_single_frame=True):
+                 ax_concat=1,
+                min_single_frame=False):
 
     # Truncate movie
     video_length = min(mov.shape[2],
@@ -33,8 +34,8 @@ def movie_writer(mov,
         mov_res = mov_res - mov_res.min(axis=ax_,keepdims=True)
 
     mov = (mov - mov.min())/(mov.max() - mov.min())*min_unit;
-    mov_den = (mov_den - mov_den.min())/(mov_den.max() - mov_den.min())*min_unit;
-    mov_res = (mov_res - mov_res.min())/(mov_res.max() - mov_res.min())*min_unit;
+    mov_den = (mov_den - mov_den.min())/(mov_den.max() - mov_den.min())*min_unit
+    mov_res = (mov_res - mov_res.min())/(mov_res.max() - mov_res.min())*min_unit
 
     #mov = video_normalization(mov)
     #mov_den = video_normalization(mov_den)
@@ -44,7 +45,7 @@ def movie_writer(mov,
                                 mov_den,
                                 mov-mov_den
                                 ],
-                                axis=2)
+                                axis=ax_concat)
 
     writer = skvideo.io.FFmpegWriter(fname_out_movie)
 

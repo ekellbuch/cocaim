@@ -159,15 +159,19 @@ def local_correlations_fft(Y,
     Cn = np.mean(Yconv * Y, axis=0) / MASK
     return Cn
 
+
 def cn_ranks_dx_plot(ranks,
                   dims,
                   nblocks=[10, 10],
                     figsize=15,
                     fontsize=20,
                     tile_err=100,
-                    include_err=True):
+                    include_err=True,
+                    save_fig=False,
+                   save_fig_name=''):
     rtype=[None,'r','c','rc']
     for ii,rank in enumerate(ranks):
+        cname_= save_fig_name+'_offset_'+str(rtype[ii])+'_'
         if not include_err:
             rank=rank%tile_err
             rank[rank==0]=1
@@ -177,7 +181,9 @@ def cn_ranks_dx_plot(ranks,
                   nblocks=nblocks,
                   offset_case=rtype[ii],
                      figsize=figsize,
-                     fontsize=fontsize)
+                     fontsize=fontsize,
+                     save_fig=save_fig,
+                     save_fig_name=cname_)
     return
 
 
@@ -189,7 +195,9 @@ def cn_ranks_plot(ranks,
                   exclude_max=True,
                   max_rank=100,
                  fontsize=20,
-                 figsize=15):
+                 figsize=15,
+                 save_fig_name='',
+                 save_fig=False):
     """
     Plot rank array given ranks of individual tiles,
     and tile coordinates.
@@ -264,7 +272,12 @@ def cn_ranks_plot(ranks,
         ax3.text(row_val + rows[ii] / 2, col_val +
                  cols[ii] / 2, c, va='center', ha='center',fontsize=fontsize)
     plt.tight_layout()
-    plt.show()
+    if save_fig:
+        save_fig_name = save_fig_name+'ranks_plot.pdf'
+        plt.savefig(save_fig_name)
+    else:
+        plt.show()
+
     return Cplot3
 
 
@@ -284,10 +297,10 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
         plots_ = zip(ax, [Y, Y_hat, R])
 
     for ax_, arr in plots_:
-        if len(dims) > 2:
+        if np.ndim(arr) > 2:
             ims = ax_.imshow(arr.reshape(dims, order='F')[:, :, idx_])
         else:
-            ims = ax_.imshow(arr.reshape(dims, order='F'))
+            ims = ax_.imshow(arr.reshape(dims[:2], order='F'))
         #ims = ax_.imshow(arr.reshape(dims,order='F').var(2))
         d = make_axes_locatable(ax_)
         cax0 = d.append_axes("bottom", size="5%", pad=0.5)
@@ -298,27 +311,43 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
     return
 
 
-def plot_temporal_traces(V_TF, V_hat=None):
+def plot_temporal_traces(V_TF, V_hat=None,title_=''):
     """
     """
+    if np.ndim (V_TF)==1:
+        V_TF =V_TF[np.newaxis,:]
+    if np.ndim (V_hat)==1:
+        v_hat = V_hat[np.newaxis,:]
+    else:
+        v_hat = V_hat
+
     for idx, vt in enumerate(np.asarray(V_TF)):
         plt.figure(figsize=(15, 5))
-        plt.title('Temporal component %d' % idx)
-        if V_hat is not None:
-            if np.ndim(V_hat) <= 1:
-                plt.plot(V_hat, 'b')
-            else:
-                plt.plot(V_hat[idx, :], 'b')
-        plt.plot(vt, 'r')
+        plt.title(('Temporal component %d'+ title_)% idx)
+        plt.plot(vt, 'b-')
+        if v_hat is not None:
+            plt.plot(v_hat[idx, :], 'r--')
+            plt.legend(['raw','denoised'])
         plt.show()
     return
 
 
-def plot_spatial_component(U_hat, dims):
+def plot_spatial_component(U_, Y_hat=None,dims=None):
     """
     """
-    for ii in range(U_hat.shape[1]):
-        plot_comp(U_hat[:, ii], title_='Spatial component U' +
+    if np.ndim(U_) ==1:
+        U_=U_[:,np.newaxis]
+
+    if np.ndim(Y_hat) ==1:
+        Y_hat=Y_hat[:,np.newaxis]
+
+    U_hat_c = None
+    for ii in range(U_.shape[1]):
+        if Y_hat is not None:
+            U_hat_c = Y_hat[:,ii]
+        plot_comp(U_[:, ii],
+            Y_hat=U_hat_c,
+            title_='Spatial component U' +
                   str(ii), dims=dims[:2])
     return
 
@@ -450,7 +479,9 @@ def comparison_plot(cn_see,
                     share_colorbar=False,
                     plot_colormap='jet',
                     plot_num_samples=1000,
-                    cbar_ticks_number=None):
+                    cbar_ticks_number=None,
+                   save_fig=False,
+                   save_fig_name='corr_'):
     """
     """
     if share_colorbar:
@@ -502,9 +533,9 @@ def comparison_plot(cn_see,
             Cn =array - array.min()
             Cn = Cn/Cn.max()
             title_prefix = 'Single Frame: '
-        #print ('%s range [%.1e %.1e]'%(title_prefix,
-        #                           Cn.min(),
-        #                           Cn.max()))
+        print ('%s range [%.1e %.1e]'%(title_prefix,
+                                   Cn.min(),
+                                   Cn.max()))
         Cn_all.append(Cn)
 
     #######################
@@ -557,8 +588,11 @@ def comparison_plot(cn_see,
 
 
     plt.tight_layout()
-    #plt.savefig('cosyne_comparison_single_frame_vertical.svg')
-    plt.show()
+    if save_fig:
+        save_fig_name = save_fig_name+'comparison_plot_'+'.pdf'
+        plt.savefig(save_fig_name)
+    else:
+        plt.show()
     return
 
 
@@ -617,7 +651,8 @@ def tiling_grid_plot(W,
     """
     """
     dims = W.shape
-    col_array, row_array = tgrid.tile_grids(dims, nblocks)
+    col_array, row_array = tgrid.tile_grids(dims,
+                                        nblocks=nblocks)
     x, y = np.meshgrid(row_array, col_array)
     if plot_option == 'var':
         Cn1 = W.var(2)
@@ -631,6 +666,7 @@ def tiling_grid_plot(W,
     plt.imshow(Cn1)
     plt.show()
     return
+
 
 def spatial_filter_spixel_plot(data,y_hat,hat_k):
     Cn_y, _ = correlation_pnr(data) #
@@ -669,3 +705,4 @@ def spatial_filter_spixel_plot(data,y_hat,hat_k):
     plt.tight_layout()
     plt.show()
     return
+
