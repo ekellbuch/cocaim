@@ -12,10 +12,15 @@ import tool_grid as tgrid
 import noise_estimator
 
 
+# update noise estimators
+# clean up comments after revision
 def correlation_pnr(Y,
-                    gSig=None,
+                    gSig=None, #deprecated
                     center_psf=True,
-                    swap_dim=True):
+                    remove_small_val =False,
+                    remove_small_val_th =3
+                   ):
+                    #swap_dim=True):
     """
     compute the correlation image and the peak-to-noise ratio (PNR) image.
     If gSig is provided, then spatially filtered the video.
@@ -39,54 +44,64 @@ def correlation_pnr(Y,
             peak-to-noise ratios of all pixels/voxels
 
     """
-    if swap_dim:
-        Y = np.transpose(
-            Y, tuple(np.hstack((Y.ndim - 1,
-                list(range(Y.ndim))[:-1]))))
+    #if swap_dim:
+    #    Y = np.transpose(
+    #        Y, tuple(np.hstack((Y.ndim - 1,
+    #            list(range(Y.ndim))[:-1]))))
 
     # parameters
-    _, d1, d2 = Y.shape
-    data_raw = Y.reshape(-1, d1, d2).astype('float32')
+    #_, d1, d2 = Y.shape
+    
+    
+    #data_raw = Y.reshape(-1, d1, d2).astype('float32')
 
     # filter data
-    data_filtered = data_raw.copy()
-    if gSig:
-        if not isinstance(gSig, list):
-            gSig = [gSig, gSig]
-        ksize = tuple([(3 * i) // 2 * 2 + 1 for i in gSig])
+    #data_filtered = data_raw.copy()
+    #if gSig:
+    #    if not isinstance(gSig, list):
+    #        gSig = [gSig, gSig]
+    #    ksize = tuple([(3 * i) // 2 * 2 + 1 for i in gSig])
         # create a spatial filter for removing background
         # psf = gen_filter_kernel(width=ksize, sigma=gSig, center=center_psf)
+    
+    #    if center_psf:
+    #        for idx, img in enumerate(data_filtered):
+    #            data_filtered[idx, ] = cv2.GaussianBlur(img,
+    #                                                    ksize=ksize,
+    #                                                    sigmaX=gSig[0],
+    #                                                    sigmaY=gSig[1],
+    #                                                    borderType=1) \
+    #                - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
+    #        # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
+    #    else:
+    #        for idx, img in enumerate(data_filtered):
+    #            data_filtered[idx, ] = cv2.GaussianBlur(
+    #                img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1)
 
-        if center_psf:
-            for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(img,
-                                                        ksize=ksize,
-                                                        sigmaX=gSig[0],
-                                                        sigmaY=gSig[1],
-                                                        borderType=1) \
-                    - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
-            # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
-        else:
-            for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(
-                    img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1)
+    # compute peak-to-noise ratio    
+    #data_filtered -= np.mean(data_filtered, axis=0)
+    Y = Y - Y.mean(2,keepdims=True)
+    #data_max = np.max(data_filtered, axis=0)
+    data_max = Y.max(2)#,keepdims=True)   
+    #data_std = noise_estimator.get_noise_fft(data_filtered.transpose())[0].transpose()
+    data_std = noise_estimator.get_noise_fft(Y)[0]
+    # Update to match noise from denoise.py here
 
-    # compute peak-to-noise ratio
-    data_filtered -= np.mean(data_filtered, axis=0)
-    data_max = np.max(data_filtered, axis=0)
-    data_std = noise_estimator.get_noise_fft(data_filtered.transpose())[0].transpose()
-    # data_std = get_noise(data_filtered, method='diff2_med')
-
+    ## data_std = get_noise(data_filtered, method='diff2_med')
     pnr = np.divide(data_max, data_std)
-    pnr[pnr < 0] = 0
+    if remove_small_val:
+        pnr[pnr < 0] = 0
 
+    tmp_data = Y / data_std[:,:,np.newaxis]
     # remove small values
-    tmp_data = data_filtered.copy() / data_std
-    tmp_data[tmp_data < 3] = 0
+    #tmp_data = data_filtered.copy() / data_std
+    if remove_small_val:
+        tmp_data[tmp_data < remove_small_val_th] = 0
 
     # compute correlation image
     # cn = local_correlation(tmp_data, d1=d1, d2=d2)
-    cn = local_correlations_fft(tmp_data, swap_dim=False)
+    #cn = local_correlations_fft(tmp_data, swap_dim=False)
+    cn = local_correlations_fft(tmp_data, swap_dim=True)
 
     return cn, pnr
 
@@ -401,12 +416,13 @@ def plot_vt_cov(Vt1, keep1, maxlag):
     return
 
 
-def show_img(ax,
-             img,
+def show_img(img,
+             ax=None,
              vmin=None,
              vmax=None,
              cbar_orientation='horizontal',
              plot_colormap='jet',
+             plot_size=(12,7),
              cbar_ticks_number=None,
              cbar_ticks=None,
              cbar_enable=True):
@@ -414,11 +430,15 @@ def show_img(ax,
     Visualize image
     """
 
+    if ax is None:
+        fig = plt.figure(figsize=plot_size)
+        ax = plt.subplot(111)
+        
     vmin= img.min() if vmin is None else vmin
     vmax= img.max() if vmax is None else vmax
 
 
-    if np.abs(img.min()) <= 1:
+    if np.abs(img.min()) <= 1.5:
         if np.abs(img.min()) <= -1e-1:
             format_tile = '%.1e'
         else:
@@ -479,6 +499,9 @@ def comparison_plot(cn_see,
                     share_colorbar=False,
                     plot_colormap='jet',
                     plot_num_samples=1000,
+                    remove_small_val_th=0,
+                    remove_small_val=False,
+                    plot_size = 12,
                     cbar_ticks_number=None,
                    save_fig=False,
                    save_fig_name='corr_'):
@@ -515,8 +538,10 @@ def comparison_plot(cn_see,
         if option =='corr': # Correlation
             Cn, _ = correlation_pnr(array,
                                     gSig=None,
-                                    center_psf=False,
-                                    swap_dim=True) # 10 no ds
+                                    remove_small_val=remove_small_val,
+                                    remove_small_val_th=remove_small_val_th,
+                                    center_psf=False)#,
+                                    #swap_dim=True) # 10 no ds
 
             title_prefix = 'Local correlation: '
         elif option =='var': #Variance
@@ -527,8 +552,10 @@ def comparison_plot(cn_see,
         elif option =='pnr': # PNR
             _, Cn = correlation_pnr(array,
                                     gSig=None,
-                                    center_psf=False,
-                                    swap_dim=True)
+                                    remove_small_val=remove_small_val,
+                                    remove_small_val_th=remove_small_val_th,
+                                    center_psf=False)#,
+                                    #swap_dim=True)
         elif option=='input':
             Cn =array - array.min()
             Cn = Cn/Cn.max()
@@ -558,7 +585,7 @@ def comparison_plot(cn_see,
     y_ticks= np.linspace(0,dim2,5).astype('int')
 
     fig, axarr = plt.subplots(d1,d2,
-                              figsize=(d1*12,d2*12),
+                              figsize=(d1*plot_size,d2*plot_size),
                               sharex=sharex,
                               sharey=sharey)
 
@@ -567,8 +594,8 @@ def comparison_plot(cn_see,
 
 
     for ii, Cn in enumerate(Cn_all):
-        show_img(axarr[ii],
-                 Cn,
+        show_img(Cn,
+                 ax =axarr[ii],
                  cbar_orientation=cbar_orientation,
                  vmin=vmin_[ii],
                  vmax=vmax_[ii],
@@ -705,4 +732,3 @@ def spatial_filter_spixel_plot(data,y_hat,hat_k):
     plt.tight_layout()
     plt.show()
     return
-

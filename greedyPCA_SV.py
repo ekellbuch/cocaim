@@ -22,17 +22,19 @@ import matplotlib.pyplot as plt
 import trefide
 from trefide.temporal import TrendFilter
 import denoise
-#import trefide_old
 import util_plot as uplot
 import tools as tools_
 #from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 
 # turn off option for computing mean_th one at a time
-# update option st mean_th factor is different
+# update metric for mean_th_factor -- default always 1
 # reruns should not denoised top components
+# currently w snr_th_2
 # identify best residual threshold metric
 # better handle components to get better order params
+# add L1 constraint on U
+# update descriptions
 
 def difference_operator(len_signal):
     # Gen Diff matrix
@@ -432,15 +434,16 @@ def denoise_patch(M,
                 extra_iterations=1,
                 fudge_factor=1.0,
                 greedy=True,
+                max_num_components=30,
                 max_num_iters=10,
-                maxlag=3,
+                maxlag=10,
                 mean_th=None,
-                mean_th_factor=1.15,
+                mean_th_factor=1.0,
                 min_rank=1,
                 noise_norm=False,
                 plot_en=False,
                 share_th=True,
-                snr_threshold=2.0,
+                snr_threshold=0,
                 tfide=False,
                 tfilt=False,
                 tsub=1,
@@ -533,6 +536,7 @@ def denoise_patch(M,
                                    extra_iterations=extra_iterations,
                                    fudge_factor=fudge_factor,
                                    greedy=greedy,
+                                   max_num_components=max_num_components,
                                    max_num_iters=max_num_iters,
                                    maxlag=maxlag,
                                    mean_th=mean_th,
@@ -1025,6 +1029,9 @@ def greedy_component_denoiser(Y,
                 bad_iter = (F_uv >= F_UVs[loop_-1])
 
                 if no_change or bad_iter:
+
+                    if max_num_iters==loop_:
+                        print('Reached max number of iters without converging.')
                     if verbose:
                         print('\tIteration %d loop %d end - no significant updates\n'%(
                                             run_count,loop_))
@@ -1324,17 +1331,17 @@ def denoise_components(data,
                         extra_iterations=1,
                         fudge_factor=1.,
                         greedy=True,
-                        maxlag=5,
+                        maxlag=10,
                         max_num_components=30,
                         max_num_iters=20,
                         mean_th=None,
                         mean_th_factor=1.,
-                        mean_th_factor2=1.15,
+                        mean_th_factor2=1.,
                         min_rank=1,
                         plot_en=False,
                         solver='trefide',
-                        snr_components_flag=False,
-                        snr_threshold = 2.0,
+                        snr_components_flag=True,
+                        snr_threshold = 2,
                         tsub=1,
                         U_update=False,
                         verbose=False):
@@ -1395,7 +1402,7 @@ def denoise_components(data,
         decimation_flag = True
         print('Reset flag') if verbose else 0
 
-    mu = data.mean(1, keepdims=True)
+    mu = 0#data.mean(1, keepdims=True)
     #std = data.std(1,keepdims=True)
     #data = (data - mu)/std
     data = data - mu
@@ -1413,7 +1420,8 @@ def denoise_components(data,
 
     # if greedy Force x2 mean_th (store only big components)
     if greedy and (mean_th_factor <= 1.):
-        mean_th_factor = 2.
+        pass
+        #mean_th_factor = 2.
 
     # Select components
     ctid, mean_th = find_temporal_component(Vt,
@@ -1471,6 +1479,7 @@ def denoise_components(data,
         S = np.diag(s[keep1])
         Vt = S.dot(Vt[keep1,:])
         U = U[:,keep1]
+
     ##############################################
     ############# Check for low SNR components
     ##############################################
@@ -1491,7 +1500,6 @@ def denoise_components(data,
             U  = U[:,high_snr_components]
     else: # al components are high SNR
         Residual_components = 0
-
 
     if greedy:
         try:
@@ -1524,7 +1532,6 @@ def denoise_components(data,
     n_comp, T = Vt.shape
 
     # include components with low SNR
-    #snr_components_flag = False
     if snr_components_flag and (num_low_snr_components>0):
         Yd += Residual_components
         n_comp += num_low_snr_components
