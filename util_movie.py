@@ -10,13 +10,16 @@ import pylab as pl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import skvideo.io
+import util_plot
+import cv2
 
 def movie_writer(mov,
                 mov_den,
                 fname_out_movie,
                 video_length,
                 min_unit=255,
-                min_single_frame=True):
+                 ax_concat=1,
+                min_single_frame=False):
 
     # Truncate movie
     video_length = min(mov.shape[2],
@@ -33,8 +36,8 @@ def movie_writer(mov,
         mov_res = mov_res - mov_res.min(axis=ax_,keepdims=True)
 
     mov = (mov - mov.min())/(mov.max() - mov.min())*min_unit;
-    mov_den = (mov_den - mov_den.min())/(mov_den.max() - mov_den.min())*min_unit;
-    mov_res = (mov_res - mov_res.min())/(mov_res.max() - mov_res.min())*min_unit;
+    mov_den = (mov_den - mov_den.min())/(mov_den.max() - mov_den.min())*min_unit
+    mov_res = (mov_res - mov_res.min())/(mov_res.max() - mov_res.min())*min_unit
 
     #mov = video_normalization(mov)
     #mov_den = video_normalization(mov_den)
@@ -44,13 +47,41 @@ def movie_writer(mov,
                                 mov_den,
                                 mov-mov_den
                                 ],
-                                axis=2)
+                                axis=ax_concat)
 
     writer = skvideo.io.FFmpegWriter(fname_out_movie)
 
     for frame in range(video_length):
         writer.writeFrame(movie_frames[frame,:,:])
     writer.close()
+    return
+
+
+def play(movie, gain=3, fr=120, offset=0, magnification=3,
+    frame_range=[350,1000]):
+    maxmov = np.max(movie)
+    looping=True
+    terminated=False
+    while looping:
+        for t in range(frame_range[0], frame_range[1]):
+            if magnification != 1:
+                frame = cv2.resize(movie[:,:,t],
+                                   None,
+                                   fx=magnification,
+                                   fy=magnification,
+                                   interpolation=cv2.INTER_LINEAR)
+            cv2.imshow('frame', (frame - offset) / maxmov*gain)
+            if cv2.waitKey(int(1. / fr * 1000)) & 0xFF == ord('q'):
+                looping = False
+                terminated = True
+                break
+        if terminated:
+            break
+
+    cv2.waitKey(100)
+    cv2.destroyAllWindows()
+    for i in range(10):
+        cv2.waitKey(100)
     return
 
 

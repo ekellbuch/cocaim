@@ -1,7 +1,13 @@
+import numpy as np
+
+
+import noise_estimator
 import spatial_filtering
 import tool_grid
 import time
-import noise_estimator
+
+#from trefide.utils.noise import estimate_noise
+
 
 # ____________________________
 # Wrapper to call denoisers
@@ -22,42 +28,53 @@ def spatial(Y_new,
 
 
 def temporal(W,
-             nblocks=[10,10],
+             confidence=0.999,
              dx=1,
-             maxlag=10,
-             confidence=0.99,
+             fudge_factor=1,
              greedy=False,
-             fudge_factor=0.99,
+             maxlag=3,
              mean_th_factor=1.15,
-             U_update=False,
              min_rank=1,
-             stim_knots=None,
-             stim_delta=200):
+             nblocks=[10,10],
+             snr_threshold=2,
+             U_update=False,
+             verbose=False):
     """
     Calls greedy temporal denoiser in pixel neighborhood
     """
     #start = time.time()
     mov_d, ranks = tool_grid.denoise_dx_tiles(W,
-                                              nblocks=nblocks,
-                                              dx=dx,
-                                              maxlag=maxlag,
                                               confidence=confidence,
-                                              greedy=greedy,
+                                              dx=dx,
                                               fudge_factor=fudge_factor,
+                                              greedy=greedy,
+                                              maxlag=maxlag,
                                               mean_th_factor=mean_th_factor,
-                                              U_update=U_update,
                                               min_rank=min_rank,
-                                              stim_knots=stim_knots,
-                                              stim_delta=stim_delta)
+                                              nblocks=nblocks,
+                                              snr_threshold=snr_threshold,
+                                              U_update=U_update,
+                                              verbose=verbose)
     #print('Temporal denoiser run for %.3f sec'%(time.time()-start))
     return mov_d, ranks
 
 
 def noise_level(mov_wf,
-                range_ff =[0.25,0.5]):
+                range_ff =[0.25,0.5],
+               noise_method='mean'):
     """
     Calculate noise level in movie pixels
+    use mean instead of logmexp
     """
+    ndim_ = np.ndim(mov_wf)
+    if ndim_==3:
+        dims_ = mov_wf.shape
+        mov_wf = mov_wf.reshape((np.prod(dims_[:2]), dims_[2]),order='F')
     noise_level = noise_estimator.get_noise_fft(mov_wf,
-                                                    noise_range=range_ff)[0]
+                                                      noise_range=range_ff)[0]
+    #noise_level = noise_estimator.estimate_noise(mov_wf,
+    #                                             summarize=noise_method)#[0]
+    if ndim_ ==3:
+        noise_level = noise_level.reshape(dims_[:2], order='F')
+
     return noise_level

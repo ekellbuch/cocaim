@@ -11,11 +11,40 @@ import tools as tools_
 import tool_grid as tgrid
 import noise_estimator
 
+import denoise
+import superpixel_analysis as sup
+# update noise estimators
+# clean up comments after revision
 
+
+
+def superpixe_component(Yd,
+					cut_off_point=0.9,
+					length_cut=10,
+					th=2,
+					num_plane=1,
+					plot_en=False,
+					text=False):
+
+	dims = Yd.shape[:2];
+	T = Yd.shape[2];
+
+	Yt = sup.threshold_data(Yd, th=th);
+	connect_mat_1, idx, comps, permute_col = sup.find_superpixel(Yt,
+																cut_off_point,
+																length_cut,
+																eight_neighbours=True);
+
+	return Yt, connect_mat_1, idx, comps, permute_col
+
+    
 def correlation_pnr(Y,
-                    gSig=None,
+                    gSig=None, #deprecated
                     center_psf=True,
-                    swap_dim=True):
+                    remove_small_val =False,
+                    remove_small_val_th =3
+                   ):
+                    #swap_dim=True):
     """
     compute the correlation image and the peak-to-noise ratio (PNR) image.
     If gSig is provided, then spatially filtered the video.
@@ -39,54 +68,65 @@ def correlation_pnr(Y,
             peak-to-noise ratios of all pixels/voxels
 
     """
-    if swap_dim:
-        Y = np.transpose(
-            Y, tuple(np.hstack((Y.ndim - 1,
-                list(range(Y.ndim))[:-1]))))
+    #if swap_dim:
+    #    Y = np.transpose(
+    #        Y, tuple(np.hstack((Y.ndim - 1,
+    #            list(range(Y.ndim))[:-1]))))
 
     # parameters
-    _, d1, d2 = Y.shape
-    data_raw = Y.reshape(-1, d1, d2).astype('float32')
+    #_, d1, d2 = Y.shape
+
+
+    #data_raw = Y.reshape(-1, d1, d2).astype('float32')
 
     # filter data
-    data_filtered = data_raw.copy()
-    if gSig:
-        if not isinstance(gSig, list):
-            gSig = [gSig, gSig]
-        ksize = tuple([(3 * i) // 2 * 2 + 1 for i in gSig])
+    #data_filtered = data_raw.copy()
+    #if gSig:
+    #    if not isinstance(gSig, list):
+    #        gSig = [gSig, gSig]
+    #    ksize = tuple([(3 * i) // 2 * 2 + 1 for i in gSig])
         # create a spatial filter for removing background
         # psf = gen_filter_kernel(width=ksize, sigma=gSig, center=center_psf)
 
-        if center_psf:
-            for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(img,
-                                                        ksize=ksize,
-                                                        sigmaX=gSig[0],
-                                                        sigmaY=gSig[1],
-                                                        borderType=1) \
-                    - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
-            # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
-        else:
-            for idx, img in enumerate(data_filtered):
-                data_filtered[idx, ] = cv2.GaussianBlur(
-                    img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1)
+    #    if center_psf:
+    #        for idx, img in enumerate(data_filtered):
+    #            data_filtered[idx, ] = cv2.GaussianBlur(img,
+    #                                                    ksize=ksize,
+    #                                                    sigmaX=gSig[0],
+    #                                                    sigmaY=gSig[1],
+    #                                                    borderType=1) \
+    #                - cv2.boxFilter(img, ddepth=-1, ksize=ksize, borderType=1)
+    #        # data_filtered[idx, ] = cv2.filter2D(img, -1, psf, borderType=1)
+    #    else:
+    #        for idx, img in enumerate(data_filtered):
+    #            data_filtered[idx, ] = cv2.GaussianBlur(
+    #                img, ksize=ksize, sigmaX=gSig[0], sigmaY=gSig[1], borderType=1)
 
     # compute peak-to-noise ratio
-    data_filtered -= np.mean(data_filtered, axis=0)
-    data_max = np.max(data_filtered, axis=0)
-    data_std = noise_estimator.get_noise_fft(data_filtered.transpose())[0].transpose()
-    # data_std = get_noise(data_filtered, method='diff2_med')
+    #data_filtered -= np.mean(data_filtered, axis=0)
+    Y = Y - Y.mean(2,keepdims=True)
+    #data_max = np.max(data_filtered, axis=0)
+    data_max = Y.max(2)#,keepdims=True)
+    #data_std = noise_estimator.get_noise_fft(data_filtered.transpose())[0].transpose()
+    #data_std = noise_estimator.get_noise_fft(Y)[0]
+    data_std = denoise.noise_level(Y)#[0]
+    # Update to match noise from denoise.py here
 
+    ## data_std = get_noise(data_filtered, method='diff2_med')
     pnr = np.divide(data_max, data_std)
-    pnr[pnr < 0] = 0
+    if remove_small_val:
+        pnr[pnr < 0] = 0
 
+    tmp_data = Y / data_std[:,:,np.newaxis]
     # remove small values
-    tmp_data = data_filtered.copy() / data_std
-    tmp_data[tmp_data < 3] = 0
+    #tmp_data = data_filtered.copy() / data_std
+    if remove_small_val:
+        tmp_data[tmp_data < remove_small_val_th] = 0
 
     # compute correlation image
     # cn = local_correlation(tmp_data, d1=d1, d2=d2)
-    cn = local_correlations_fft(tmp_data, swap_dim=False)
+    #cn = local_correlations_fft(tmp_data, swap_dim=False)
+    cn = local_correlations_fft(tmp_data, swap_dim=True)
 
     return cn, pnr
 
@@ -159,15 +199,19 @@ def local_correlations_fft(Y,
     Cn = np.mean(Yconv * Y, axis=0) / MASK
     return Cn
 
+
 def cn_ranks_dx_plot(ranks,
                   dims,
                   nblocks=[10, 10],
                     figsize=15,
                     fontsize=20,
                     tile_err=100,
-                    include_err=True):
+                    include_err=True,
+                    save_fig=False,
+                   save_fig_name=''):
     rtype=[None,'r','c','rc']
     for ii,rank in enumerate(ranks):
+        cname_= save_fig_name+'_offset_'+str(rtype[ii])+'_'
         if not include_err:
             rank=rank%tile_err
             rank[rank==0]=1
@@ -177,7 +221,9 @@ def cn_ranks_dx_plot(ranks,
                   nblocks=nblocks,
                   offset_case=rtype[ii],
                      figsize=figsize,
-                     fontsize=fontsize)
+                     fontsize=fontsize,
+                     save_fig=save_fig,
+                     save_fig_name=cname_)
     return
 
 
@@ -189,7 +235,9 @@ def cn_ranks_plot(ranks,
                   exclude_max=True,
                   max_rank=100,
                  fontsize=20,
-                 figsize=15):
+                 figsize=15,
+                 save_fig_name='',
+                 save_fig=False):
     """
     Plot rank array given ranks of individual tiles,
     and tile coordinates.
@@ -264,7 +312,12 @@ def cn_ranks_plot(ranks,
         ax3.text(row_val + rows[ii] / 2, col_val +
                  cols[ii] / 2, c, va='center', ha='center',fontsize=fontsize)
     plt.tight_layout()
-    plt.show()
+    if save_fig:
+        save_fig_name = save_fig_name+'ranks_plot.pdf'
+        plt.savefig(save_fig_name)
+    else:
+        plt.show()
+
     return Cplot3
 
 
@@ -284,10 +337,10 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
         plots_ = zip(ax, [Y, Y_hat, R])
 
     for ax_, arr in plots_:
-        if len(dims) > 2:
+        if np.ndim(arr) > 2:
             ims = ax_.imshow(arr.reshape(dims, order='F')[:, :, idx_])
         else:
-            ims = ax_.imshow(arr.reshape(dims, order='F'))
+            ims = ax_.imshow(arr.reshape(dims[:2], order='F'))
         #ims = ax_.imshow(arr.reshape(dims,order='F').var(2))
         d = make_axes_locatable(ax_)
         cax0 = d.append_axes("bottom", size="5%", pad=0.5)
@@ -298,27 +351,45 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
     return
 
 
-def plot_temporal_traces(V_TF, V_hat=None):
+def plot_temporal_traces(V_TF, V_hat=None,title_=''):
     """
     """
+    if np.ndim (V_TF)==1:
+        V_TF =V_TF[np.newaxis,:]
+    if np.ndim (V_hat)==1:
+        v_hat = V_hat[np.newaxis,:]
+    else:
+        v_hat = V_hat
+
     for idx, vt in enumerate(np.asarray(V_TF)):
         plt.figure(figsize=(15, 5))
-        plt.title('Temporal component %d' % idx)
-        if V_hat is not None:
-            if np.ndim(V_hat) <= 1:
-                plt.plot(V_hat, 'b')
-            else:
-                plt.plot(V_hat[idx, :], 'b')
-        plt.plot(vt, 'r')
+        plt.title(('Temporal component %d'+ title_)% idx)
+        plt.plot(vt, 'b-')
+        if v_hat is not None:
+            plt.plot(v_hat[idx, :], 'r--')
+            plt.legend(['raw','denoised'])
         plt.show()
     return
 
 
-def plot_spatial_component(U_hat, dims):
+
+
+def plot_spatial_component(U_, Y_hat=None,dims=None):
     """
     """
-    for ii in range(U_hat.shape[1]):
-        plot_comp(U_hat[:, ii], title_='Spatial component U' +
+    if np.ndim(U_) ==1:
+        U_=U_[:,np.newaxis]
+
+    if np.ndim(Y_hat) ==1:
+        Y_hat=Y_hat[:,np.newaxis]
+
+    U_hat_c = None
+    for ii in range(U_.shape[1]):
+        if Y_hat is not None:
+            U_hat_c = Y_hat[:,ii]
+        plot_comp(U_[:, ii],
+            Y_hat=U_hat_c,
+            title_='Spatial component U' +
                   str(ii), dims=dims[:2])
     return
 
@@ -372,12 +443,13 @@ def plot_vt_cov(Vt1, keep1, maxlag):
     return
 
 
-def show_img(ax,
-             img,
+def show_img(img,
+             ax=None,
              vmin=None,
              vmax=None,
              cbar_orientation='horizontal',
              plot_colormap='jet',
+             plot_size=(12,7),
              cbar_ticks_number=None,
              cbar_ticks=None,
              cbar_enable=True):
@@ -385,11 +457,15 @@ def show_img(ax,
     Visualize image
     """
 
+    if ax is None:
+        fig = plt.figure(figsize=plot_size)
+        ax = plt.subplot(111)
+
     vmin= img.min() if vmin is None else vmin
     vmax= img.max() if vmax is None else vmax
 
 
-    if np.abs(img.min()) <= 1:
+    if np.abs(img.min()) <= 1.5:
         if np.abs(img.min()) <= -1e-1:
             format_tile = '%.1e'
         else:
@@ -439,6 +515,128 @@ def show_img(ax,
     return
 
 
+def nearest_frame_corr(A):
+    """
+    """
+    num_frames = A.shape[2]
+    corrs = np.zeros((num_frames-1,))
+    for idx in range(num_frames-1):
+        frame1 = A[:,:,idx].flatten()
+        frame2 = A[:,:,idx+1].flatten()
+        corrs[idx] =  corr(frame1,frame2)
+    return corrs
+
+
+def corr(a,b):
+    a -= a.mean()
+    b -= b.mean()
+    return a.dot(b) / sqrt(a.dot(a) * b.dot(b) + np.finfo(float).eps)
+
+
+def correlation_traces(Y,Yd,R):
+    """
+    we also talked about computing "correlation traces"
+    instead of correlation images - ie, instead of computing
+    correlations between nearest neighbor pixels and showing
+    these as an image, compute correlations between nearest
+    neighbor frames and show these as a trace.  let's try this too.
+    lots of ways to slice and dice things to look at
+    how much signal we're losing / check to see that
+    we're just leaving noise behind.
+    """
+
+    corrs_Y = nearest_frame_corr(Y)
+    corrs_Yd = nearest_frame_corr(Yd)
+    corrs_R = nearest_frame_corr(R)
+
+    plt.figure(figsize=(10,10))
+    plt.title('Correlation traces')
+    plt.plot(corrs_Y)
+    plt.plot(corrs_Yda)
+    plt.plot(corrs_R)
+    plt.legend(['raw','denoised','residual'])
+
+    return 0
+
+def snr_per_frame(Y,Yd,R,
+                    cbar_orientation='vertical',
+                    plot_orientation='horizontal',
+                    title=True,
+                    titles_=['SNR_frame']):
+    """
+    take a patch and sum Y, Yd, and R over all pixels to get three traces.
+    (or even just do this on a single pixel -
+    this would be analogous to looking at a sample frame from the movie.)
+    the Yd trace will presumably look a lot like the
+    Y trace (maybe with slightly less noise) and hopefully the R trace
+    will just look like noise.
+
+    for the paper we'll also want to combine most (maybe all)
+    of these panels into one big fig - can you do this too?
+    """
+    # given patch sum over all pixels
+    titles_ = titles_*3
+    titles_[0].append(' raw')
+    titles_[1].append(' denoised')
+    titles_[2].append(' residual')
+
+    Ys = Y.sum(2)
+    Yds = Yd.sum(2)
+    Rs = R.sum(2)
+    comparison_plot([Ys,Yds,Rs],
+                    cbar_orientation=cbar_orientation,
+                    option='input',
+                    plot_orientation=plot_orientation,
+                    title=title,
+                    titles_=titles_)
+    return
+
+
+
+def nearest_frame_corr(A):
+    """
+    """
+    num_frames = A.shape[2]
+    corrs = np.zeros((num_frames-1,))
+    for idx in range(num_frames-1):
+        frame1 = A[:,:,idx].flatten()
+        frame2 = A[:,:,idx+1].flatten()
+        corrs[idx] =  corr(frame1,frame2)
+    return corrs
+
+
+def corr(a,b):
+    a -= a.mean()
+    b -= b.mean()
+    return a.dot(b) / np.sqrt(a.dot(a) * b.dot(b) +np.finfo(float).eps)
+
+
+def correlation_traces(Y,Yd,R):
+    """
+    we also talked about computing "correlation traces"
+    instead of correlation images - ie, instead of computing
+    correlations between nearest neighbor pixels and showing
+    these as an image, compute correlations between nearest
+    neighbor frames and show these as a trace.  let's try this too.
+    lots of ways to slice and dice things to look at
+    how much signal we're losing / check to see that
+    we're just leaving noise behind.
+    """
+
+    corrs_Y = nearest_frame_corr(Y)
+    corrs_Yd = nearest_frame_corr(Yd)
+    corrs_R = nearest_frame_corr(R)
+
+    plt.figure(figsize=(10,6))
+    plt.title('Correlation traces')
+    plt.plot(corrs_Y)
+    plt.plot(corrs_Yd)
+    plt.plot(corrs_R)
+    plt.legend(['raw','denoised','residual'])
+
+    return 0
+
+
 def comparison_plot(cn_see,
                     option='corr',
                     plot_orientation='horizontal',
@@ -450,17 +648,25 @@ def comparison_plot(cn_see,
                     share_colorbar=False,
                     plot_colormap='jet',
                     plot_num_samples=1000,
-                    cbar_ticks_number=None):
+                    remove_small_val_th=3,
+                    remove_small_val=False,
+                    plot_size = 12,
+                    cbar_ticks_number=None,
+                   save_fig=False,
+                   save_fig_name='corr_'):
     """
     """
+    num_plots = len(cn_see)
+
     if share_colorbar:
         min_dim=4
     else:
         min_dim=3
-    if titles_=='':
-        titles_=['original ','denoised ','residual ']
 
-    if len(cn_see)==2:
+    if titles_=='' and num_plots==2:
+        titles_=['original ','denoised ']
+
+    if num_plots==2:
         cn_see.append(cn_see[0]-cn_see[1])
         titles_.append('residual ')
 
@@ -484,8 +690,10 @@ def comparison_plot(cn_see,
         if option =='corr': # Correlation
             Cn, _ = correlation_pnr(array,
                                     gSig=None,
-                                    center_psf=False,
-                                    swap_dim=True) # 10 no ds
+                                    remove_small_val=remove_small_val,
+                                    remove_small_val_th=remove_small_val_th,
+                                    center_psf=False)#,
+                                    #swap_dim=True) # 10 no ds
 
             title_prefix = 'Local correlation: '
         elif option =='var': #Variance
@@ -496,15 +704,29 @@ def comparison_plot(cn_see,
         elif option =='pnr': # PNR
             _, Cn = correlation_pnr(array,
                                     gSig=None,
-                                    center_psf=False,
-                                    swap_dim=True)
+                                    remove_small_val=remove_small_val,
+                                    remove_small_val_th=remove_small_val_th,
+                                    center_psf=False)#,
+                                    #swap_dim=True)
+            title_prefix = 'PNR: '
+
         elif option=='input':
             Cn =array - array.min()
             Cn = Cn/Cn.max()
             title_prefix = 'Single Frame: '
-        #print ('%s range [%.1e %.1e]'%(title_prefix,
-        #                           Cn.min(),
-        #                           Cn.max()))
+
+        elif option=='snr':
+            Cn1 = array.std(2)
+            Cn2 = denoise.noise_level(array)
+            Cn = Cn1/Cn2
+            title_prefix = 'SNR: '
+        else:
+            title_prefix = ''
+
+
+        print ('%s range [%.1e %.1e]'%(title_prefix,
+                                   Cn.min(),
+                                   Cn.max()))
         Cn_all.append(Cn)
 
     #######################
@@ -527,7 +749,7 @@ def comparison_plot(cn_see,
     y_ticks= np.linspace(0,dim2,5).astype('int')
 
     fig, axarr = plt.subplots(d1,d2,
-                              figsize=(d1*12,d2*12),
+                              figsize=(d1*plot_size,d2*plot_size),
                               sharex=sharex,
                               sharey=sharey)
 
@@ -536,8 +758,8 @@ def comparison_plot(cn_see,
 
 
     for ii, Cn in enumerate(Cn_all):
-        show_img(axarr[ii],
-                 Cn,
+        show_img(Cn,
+                 ax =axarr[ii],
                  cbar_orientation=cbar_orientation,
                  vmin=vmin_[ii],
                  vmax=vmax_[ii],
@@ -557,8 +779,11 @@ def comparison_plot(cn_see,
 
 
     plt.tight_layout()
-    #plt.savefig('cosyne_comparison_single_frame_vertical.svg')
-    plt.show()
+    if save_fig:
+        save_fig_name = save_fig_name+'comparison_plot_'+'.pdf'
+        plt.savefig(save_fig_name)
+    else:
+        plt.show()
     return
 
 
@@ -617,7 +842,8 @@ def tiling_grid_plot(W,
     """
     """
     dims = W.shape
-    col_array, row_array = tgrid.tile_grids(dims, nblocks)
+    col_array, row_array = tgrid.tile_grids(dims,
+                                        nblocks=nblocks)
     x, y = np.meshgrid(row_array, col_array)
     if plot_option == 'var':
         Cn1 = W.var(2)
@@ -631,6 +857,7 @@ def tiling_grid_plot(W,
     plt.imshow(Cn1)
     plt.show()
     return
+
 
 def spatial_filter_spixel_plot(data,y_hat,hat_k):
     Cn_y, _ = correlation_pnr(data) #
