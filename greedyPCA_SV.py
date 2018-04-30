@@ -24,6 +24,8 @@ from trefide.temporal import TrendFilter
 import denoise
 import util_plot as uplot
 import tools as tools_
+
+import greedy_spatial
 #from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 
@@ -35,6 +37,92 @@ import tools as tools_
 # better handle components to get better order params
 # add L1 constraint on U
 # update descriptions
+
+
+def vector_acov(Vt,
+                iterate=False,
+                extra=1,
+                maxlag=10,
+                mean_th=0.10,
+                min_rank=0,
+                verbose=False):
+    """
+    Calculate auto covariance of row vectors in Vt
+    and output indices of vectors which pass correlation null hypothesis.
+    Parameters:
+    ----------
+    Vt:         np.array(k x T)
+                row array of compoenents on which to test correlation null hypothesis
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    maxlag:     int
+                determined lag until which to average ACF of row-vectors for null hypothesis
+    iterate:    boolean
+                flag to include components which pass null hypothesis iteratively
+                (i.e. if the next row fails, no additional components are added)
+    extra:      int
+                number of components to add as extra to components which pass null hypothesis
+                components are added in ascending order corresponding to order in mean_th
+    min_rank:   int
+                minimum number of components that should be included
+                add additional components given components that (not) passed null hypothesis
+    verbose:    boolean
+                flag to enable verbose
+
+    Outputs:
+    -------
+    keep:       list
+                includes indices of components which passed the null hypothesis
+                and/or additional components added given parameters
+    """
+
+    keep = []
+    num_components = Vt.shape[0]
+    #print(Vt.shape)
+    #print(np.sqrt(np.sum(Vt**2,1)))
+    if True:
+        print('mean_th is %s'%mean_th) if verbose else 0
+        if iterate:
+            for vector in range(0, num_components):
+                # standarize and normalize
+                vi = Vt[vector, :]
+                vi =(vi - vi.mean())/vi.std()
+
+                print('vi ~ (mean: %.3f,var:%.3f)'%(vi.mean(),
+                                                    vi.var())) if verbose else 0
+
+                vi_cov = tools_.axcov(vi,
+                                    maxlag)[maxlag:]/vi.var()
+
+                if vi_cov.mean() < mean_th:
+                    if iterate is True:
+                        break
+                else:
+                    keep.append(vector)
+        else:
+            Vt1 = (Vt-Vt.mean(1,keepdims=True))/Vt.std(1,keepdims=True)
+            means_ =(np.apply_along_axis(tools_.axcov,1,Vt1,maxlag)[:,maxlag:]).mean(1)
+            keep = np.where(means_>mean_th)[0]
+
+    # Store extra components
+    #print(keep)
+    keep2 = []
+    for vi in keep:#range(num_components):#keep:
+        v_ = Vt[vi, :]
+        ntf = norm_TF(v_)/np.sum(np.abs(v_))
+        #print('TF norm')
+        #print('%d %f' % (vi, ntf))
+        if ntf < 2.25:
+            keep2.append(vi)
+    keep = keep2
+
+    # Forcing one components
+    if np.any(keep) and min_rank > 0:
+        keep = [0]
+        if verbose:
+            print('Forcing one component')
+    return keep
+
 
 def difference_operator(len_signal):
     # Gen Diff matrix
@@ -182,8 +270,8 @@ def choose_rank(Vt,
         keep2 = keep1
 
     vtid[0, keep1] = 1  # components stored due to cov
-    vtid[1, keep2] = 1  # components stored due to kurto
-    vtid[2, loose] = 1  # extra components ignored
+    #vtid[1, keep2] = #0  # components stored due to kurto
+    vtid[2, loose] = 0  # extra components ignored
 
     return vtid
 
@@ -230,79 +318,33 @@ def wnoise_acov_CI(L,
     return mean_confidence_interval(covs_ht2, confidence)
 
 
-def vector_acov(Vt,
-                iterate=False,
-                extra=1,
-                maxlag=10,
-                mean_th=0.10,
-                min_rank=0,
-                verbose=False):
+
+def discrete_diff_operator(L,order=2):
     """
-    Calculate auto covariance of row vectors in Vt
-    and output indices of vectors which pass correlation null hypothesis.
-
-    Parameters:
-    ----------
-    Vt:         np.array(k x T)
-                row array of compoenents on which to test correlation null hypothesis
-    mean_th:    float
-                threshold employed to reject components according to correlation null hypothesis
-    maxlag:     int
-                determined lag until which to average ACF of row-vectors for null hypothesis
-    iterate:    boolean
-                flag to include components which pass null hypothesis iteratively
-                (i.e. if the next row fails, no additional components are added)
-    extra:      int
-                number of components to add as extra to components which pass null hypothesis
-                components are added in ascending order corresponding to order in mean_th
-    min_rank:   int
-                minimum number of components that should be included
-                add additional components given components that (not) passed null hypothesis
-    verbose:    boolean
-                flag to enable verbose
-
-    Outputs:
-    -------
-    keep:       list
-                includes indices of components which passed the null hypothesis
-                and/or additional components added given parameters
+    Returns discrete difference operator
+    of order k+1
+    where D(k+1) [n-k-1] x n
     """
 
-    keep = []
-    num_components = Vt.shape[0]
-    print('mean_th is %s'%mean_th) if verbose else 0
-    if iterate:
-        for vector in range(0, num_components):
-            # standarize and normalize
-            vi = Vt[vector, :]
-            vi =(vi - vi.mean())/vi.std()
+    if order ==1:
+        #assert L > 0
+        D = (np.diag(np.ones(L-1)*1, 1)
+             +np.diag(np.ones(L)*-1))[:(L-1),:]
+    elif order ==2:
+        #assert L > 1
+        D = (np.diag(np.ones(L-1)*-2, 1)
+            +np.diag(np.ones(L)*1)
+            +np.diag(np.ones(L-2),2))[:(L-2),:]
+    return D
 
-            print('vi ~ (mean: %.3f,var:%.3f)'%(vi.mean(),
-                                                vi.var())) if verbose else 0
+def norm_1 (x):
+    return np.sum(np.abs(x))
 
-            vi_cov = tools_.axcov(vi,
-                                maxlag)[maxlag:]/vi.var()
-
-            if vi_cov.mean() < mean_th:
-                if iterate is True:
-                    break
-            else:
-                keep.append(vector)
-    else:
-        Vt = (Vt-Vt.mean(1,keepdims=True))/Vt.std(1,keepdims=True)
-        means_ =(np.apply_along_axis(tools_.axcov,1,Vt,maxlag)[:,maxlag:]).mean(1)
-        keep = np.where(means_>mean_th)[0]
-
-    # Store extra components
-    # deprecated
-
-    # Forcing one components
-    if np.any(keep) and min_rank>0:
-        keep=[0]
-        if verbose:
-            print('Forcing one component')
-    return keep
-
+def norm_TF(x,order=2):
+    L = len(x)
+    D = discrete_diff_operator(L,order=order)
+    tf_norm = norm_1(D.dot(x))
+    return tf_norm
 
 def compute_svd(M,
                 method='vanilla',
@@ -519,6 +561,9 @@ def denoise_patch(M,
     """
     if False:
         return M, 1
+
+    if M.min()==0:
+        return M
     ndim = np.ndim(M)
 
     if np.ndim(M) ==3:
@@ -563,6 +608,10 @@ def total_rank(vtids,
                 verbose=False):
     # determine individual rank
     case1 = ~np.isnan(vtids[0,:])
+    #print(case1)
+    if np.sum(case1)==0:
+        return 0
+    #print(vtids[0,:])
     if vtids[0,case1].sum()>0:
         ranks = case1
     else:
@@ -577,6 +626,7 @@ def total_rank(vtids,
 
 def greedy_spatial_denoiser(Y,
                             V_TF,
+                            U=None,
                             fudge_factor=1,
                             U_update=False,
                             nus_=None):
@@ -586,12 +636,19 @@ def greedy_spatial_denoiser(Y,
     Update U wrt V
     """
     if U_update:
-        print('You should not be here')
-        pass
+        #print('You should not be here')
+        #pass
+        if nus_ is None:
+            #print('calling greedy spatial 642')
+            U_hat, nus_ = greedy_spatial.greedy_sp_constrained(Y,V_TF,U=U)
+        else:
+            U_hat = greedy_spatial.greedy_sp_dual(Y, V_TF,nus_,U=U)
+
         #outs_2 = [c_l1_u_hat(y, V_TF,fudge_factor) for y in Y]
         #outs_2 = update_U_parallel(Y,V_TF,fudge_factor)
         #U_hat, nus_ = map(np.asarray,zip(*np.asarray(outs_2)))
     else:
+        #print('643 HERE Trying to update the small variables')
         nus_ = None#np.zeros((Y.shape[0],))
         try:
             U_hat = np.matmul(Y, np.matmul(V_TF.T, np.linalg.inv(np.matmul(V_TF, V_TF.T))))
@@ -600,6 +657,11 @@ def greedy_spatial_denoiser(Y,
             print(e)
     #uplot.plot_spatial_component(U_hat,dims) if plot_en and (not dims==None) else 0
     return U_hat, nus_
+
+
+def norm_l2(V_TF_,verbose=False):
+    norm_V = np.sqrt(np.sum(V_TF_**2,1))[:,np.newaxis]
+    return norm_V
 
 
 def component_norm(V_TF_,
@@ -628,8 +690,12 @@ def l1tf_lagrangian(V_,
             if solver_obj is None:
                 solver_obj = TrendFilter(len(V_))
             solver_obj.lambda_ = lambda_
-            V_TF = solver_obj.denoise(np.double(V_),
+            v_ = np.double(V_)
+            #norm_v = np.sqrt(np.sum(v_**2))#[np.newaxis,:]
+            #v_ = v_/norm_v
+            V_TF = solver_obj.denoise(v_,
                                         refit=False)
+            #V_TF = V_TF*norm_v
 
         except:
             #if verbose:
@@ -666,10 +732,11 @@ def l1tf_constrained(V_hat,
         noise_std_ = []
         denoise_filters = []
         for ii in range(num_components):
+            filt = []
             filt = TrendFilter(len_signal)
-            V_TF[ii,:] = np.asarray(filt.denoise(np.double(V_hat[ii,:])))
+            v_ = np.double(V_hat[ii,:])
+            V_TF[ii,:] = np.asarray(filt.denoise(v_))
             noise_std_.append(filt.delta)
-
             if np.sqrt(filt.delta)<=1e-3:
                 #V_TF[ii,:]=V_hat[ii,:]
                 lambdas_.append(0)
@@ -735,7 +802,12 @@ def iteration_error(Y,
     if nus_ is None:
         F_uv3 = 0
     else:
-        pass #F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat),1)) #if U_update else 0
+        #pass #
+        print('815')
+        if len(nus_) == num_components:
+            F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat),0))
+        else:
+            F_uv3  = np.sum(nus_*np.sum(np.abs(U_hat),1)) #if U_update else 0
 
     return F_uv1 , F_uv2, F_uv3
 
@@ -794,6 +866,7 @@ def greedy_temporal_denoiser(Y,
                 pass
             else:
                 print('error')
+
             V_2 = l1tf_lagrangian(V_,
                                 lambda_ = clambda,
                                 solver = solver,
@@ -855,10 +928,15 @@ def greedy_component_denoiser(Y,
         if plot_en:
             V_hat_orig = V_TF.copy()
 
-        V_TF, lambdas_ , solver_obj = l1tf_constrained(V_TF,
+        # V_TF? hast to be unit variance and mean 0
+
+        #norm_V1 = np.sum(V_TF**2,1)[np.newaxis,:]
+        # print('Entered l1tf')
+        V_TF, lambdas_ , solver_obj = l1tf_constrained(V_TF,#/norm_V1,
                                         solver=solver,
                                         verbose=verbose)
 
+        #V_TF *= norm_V1
         normV_init, _ = component_norm(V_TF,
                                     U_hat,
                                     verbose=verbose,
@@ -874,6 +952,7 @@ def greedy_component_denoiser(Y,
 
         U_hat, nus_ = greedy_spatial_denoiser(Y,
                                               V_TF/normV_init,
+                                              U=U_hat,
                                               fudge_factor=fudge_factor,
                                               U_update=U_update)
 
@@ -965,9 +1044,11 @@ def greedy_component_denoiser(Y,
                 U_orig = U_hat.copy()
 
             U_hat, _ = greedy_spatial_denoiser(Y,
-                                               V_TF,
+                                               V_TF,#/norm_Vinit,
                                                nus_=nus_,
-                                               fudge_factor=fudge_factor)
+                                               U=U_hat,
+                                               fudge_factor=fudge_factor,
+                                               U_update=U_update)
 
             norm_Vinit, norm_Uinit = component_norm(V_TF,
                                                     U_hat,
@@ -975,7 +1056,7 @@ def greedy_component_denoiser(Y,
                                                     title=' after sp update')
 
             ######################
-            ## normalize U by norm 2
+            #  normalize U by norm 2
             ######################
             #V_TF_old = V_TF
             U_hat = U_hat/norm_Uinit
@@ -987,12 +1068,12 @@ def greedy_component_denoiser(Y,
                                             Y_hat=U_orig,
                                             dims=dims)
 
-            #print(norm_Uinit)
+            # print(norm_Uinit)
             norm_U[loop_] = norm_Uinit
             norm_V[loop_] = norm_Vinit.flatten()
 
             ###################
-            ### Calculate error in current iteration
+            #  Calculate error in current iteration
             ####################
 
             if np.any([math.isnan(lambda_) for lambda_ in lambdas_]):
@@ -1191,6 +1272,7 @@ def greedy_component_denoiser(Y,
 
     U_hat, _ = greedy_spatial_denoiser(Y,
                                        V_TF/normV_init,
+                                       U=U_hat,
                                        fudge_factor=fudge_factor,
                                        U_update=U_update)
 
@@ -1215,6 +1297,9 @@ def greedy_component_denoiser(Y,
             uplot.plot_temporal_traces(V_TF,
                                     V_hat=V_TF_i)
 
+        normV_init, _ = component_norm(V_TF,
+                                        U_hat)
+        #V_TF = V_TF/normV_init
     # this needs to be updated to reflect any new rank due to new numb of iterations
     return U_hat , V_TF
 
@@ -1224,7 +1309,7 @@ def find_temporal_component(Vt,
                             corr=True,
                             iterate=False,
                             kurto=False,
-                            maxlag=5,
+                            maxlag=10,
                             mean_th=None,
                             mean_th_factor=1,
                             plot_en=False,
@@ -1333,7 +1418,7 @@ def denoise_components(data,
                         greedy=True,
                         maxlag=10,
                         max_num_components=30,
-                        max_num_iters=20,
+                        max_num_iters=10,
                         mean_th=None,
                         mean_th_factor=1.,
                         mean_th_factor2=1.,
@@ -1402,7 +1487,7 @@ def denoise_components(data,
         decimation_flag = True
         print('Reset flag') if verbose else 0
 
-    mu = 0#data.mean(1, keepdims=True)
+    mu = data.mean(1, keepdims=True)
     #std = data.std(1,keepdims=True)
     #data = (data - mu)/std
     data = data - mu
@@ -1424,6 +1509,7 @@ def denoise_components(data,
         #mean_th_factor = 2.
 
     # Select components
+    #print(np.sqrt(np.sum(Vt**2,1)))
     ctid, mean_th = find_temporal_component(Vt,
                                     confidence=confidence,
                                     corr=corr,
@@ -1436,8 +1522,10 @@ def denoise_components(data,
     keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
     #print(keep1)
     # If no components to store, change to lower confidence level
-    if np.all(keep1 == np.nan):
-        print("Change to lower confidence level") if verbose else 0
+    if np.all(keep1 == np.nan) and mean_th_factor>mean_th_factor2:
+        #print(mean_th_factor)
+        #print(mean_th_factor2)
+        print("Change to lower confidence level") #if verbose else 0
         mean_th /= mean_th_factor
         mean_th_factor = mean_th_factor2
         mean_th *= mean_th_factor
@@ -1453,16 +1541,17 @@ def denoise_components(data,
 
     # If no components to store, exit & return min rank
     if np.all(keep1 == np.nan):
+        #print('Not even here')
         if min_rank == 0:
             Yd = np.zeros(data.shape)
         else:
-            min_rank = min_rank+1
+            min_rank = min_rank
             print('Forcing %d component(s)'%min_rank) if verbose else 0
             ctid[0, :min_rank]=1
             S = np.eye(min_rank)*s[:min_rank]
             U = U[:,:min_rank]
             Vt = S.dot(Vt[:min_rank,:])
-        Yd = U.dot(Vt)
+            Yd = U.dot(Vt)
         Yd += mu
         #Yd*= std
         return Yd, ctid
@@ -1485,21 +1574,98 @@ def denoise_components(data,
     ##############################################
 
     n_comp, T = Vt.shape
+    noise_level = denoise.noise_level(Vt)
+    ratio_noise = Vt.std(1)/noise_level
+    #print('Noise ratio')
+    #print(ratio_noise)
+    high_snr_components = ratio_noise> snr_threshold
 
-    high_snr_components = Vt.std(1)/denoise.noise_level(Vt) > snr_threshold
     num_low_snr_components = np.sum(~high_snr_components)
     #print(num_low_snr_components)
 
+    Denoised_residuals = 0
+    Residual_components = 0
+
+    # There are low SNR components
     if num_low_snr_components > 0: # low SNR components
-        if num_low_snr_components == n_comp: # all components are low SNR
+
+        if num_low_snr_components == n_comp:
+            print('Low SNR - all')
+            # all low SNR -- denoise once and exit
+            # denoise once and exit
+
+            if plot_en:
+                Vt_orig = Vt
+
+            norm_ = np.sum(Vt**2,1)
+            Vt, _ , _ = l1tf_constrained(Vt,
+                                solver=solver,
+                                verbose=verbose)
+
+            normV_init, _ = component_norm(Vt,
+                                        U)
+            # exit
+
+            if plot_en:
+                uplot.plot_temporal_traces(Vt_orig, Vt)
+
+            if plot_en and (not dims==None):
+                U_orig = U
+
+            U, _ = greedy_spatial_denoiser(data,
+                                          Vt/normV_init,
+                                          fudge_factor=fudge_factor,
+                                          U_update=U_update)
+
+            if plot_en and (not dims==None) :
+                uplot.plot_spatial_component(U,
+                                            Y_hat=data,
+                                            dims=dims)
+
+            _, norm_Uinit = component_norm(Vt,U)
+
+            U = U/norm_Uinit
+            #print('Low SNR all')
             greedy = False
-            Residual_components = 0
+
         else:
-            Residual_components  = U[:,~high_snr_components].dot(Vt[~high_snr_components,:])
-            Vt = Vt[high_snr_components,:]
+
+            print('There are some low SNR some high SNR')
+            # identify low SNR components
+            U_low = U[:,~high_snr_components]
+            Vt_low =Vt[~high_snr_components,:]
+            # identify higher SNR components
             U  = U[:,high_snr_components]
+            Vt = Vt[high_snr_components,:]
+
+            Residual_components  = U_low.dot(Vt_low)
+
+            print('Low SNR %d'%num_low_snr_components)
+            # denoise low SNR components once
+
+            Vt_low, _ , _ = l1tf_constrained(Vt_low,
+                                            solver=solver,
+                                            verbose=verbose)
+
+            normV_init, _ = component_norm(Vt_low,
+                                        U_low)
+
+            U_low, _ = greedy_spatial_denoiser(data,
+                                                Vt_low/normV_init,
+                                                fudge_factor=fudge_factor,
+                                                U_update=U_update)
+
+            _, norm_Uinit = component_norm(Vt_low,U_low)
+
+            U_low = U_low/norm_Uinit
+
+            Denoised_residuals =  U_low.dot(Vt_low)
+
     else: # al components are high SNR
-        Residual_components = 0
+        pass
+        # There are no low SNR components
+        #Residual_components = 0
+        #Denoised_residuals = 0
 
     if greedy:
         try:
@@ -1520,12 +1686,12 @@ def denoise_components(data,
                                             U_update=U_update,
                                             verbose=verbose)
 
-            ctid[0,np.arange(Vt.shape[0])] = 1
+            #ctid[0,np.arange(Vt.shape[0])] = 1
 
         except:
             print('\tERROR: Greedy solving failed, keeping %d parameters'%
                     (len(keep1)))
-            ctid[0, 0] = 100
+            #ctid[0, 0] = 100
 
     Yd = U.dot(Vt)
 
@@ -1533,7 +1699,7 @@ def denoise_components(data,
 
     # include components with low SNR
     if snr_components_flag and (num_low_snr_components>0):
-        Yd += Residual_components
+        Yd += Denoised_residuals
         n_comp += num_low_snr_components
         #print('low SNR')
         #print(num_low_snr_components)
@@ -1542,18 +1708,8 @@ def denoise_components(data,
     else:
         print('setting for output without low SNR') if verbose else 0
 
-    if n_comp < min_rank:
-        print('adding a rank %d input'%(min_rank-n_comp)) if verbose else 0
-
-        Rextra  = compute_svd(data-Yd,
-                            method='randomized',
-                            n_components=min_rank-n_comp,
-                            reconstruct=True)
-        n_comp = min_rank
-        Yd += Rextra
-
-    ctid[0,n_comp:] = np.nan
-    ctid[0,:n_comp] = 1
+    #ctid[0,n_comp:] = np.nan
+    #ctid[0,:n_comp] = 1
 
     Yd += mu
     return Yd, ctid
@@ -1579,7 +1735,6 @@ def c_l1tf_v_hat(v,
     Include optimal lagrande multiplier for constraint
 
     """
-    #print('c_l1tf_v_hat') if verbose else 0
 
     if np.abs(sigma)<=1e-3:
         print('Do not denoise (high SNR: noise_level=%.3e)'%

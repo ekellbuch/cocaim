@@ -10,6 +10,8 @@ import pylab as pl
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import skvideo.io
+import util_plot
+import cv2
 
 def movie_writer(mov,
                 mov_den,
@@ -52,6 +54,34 @@ def movie_writer(mov,
     for frame in range(video_length):
         writer.writeFrame(movie_frames[frame,:,:])
     writer.close()
+    return
+
+
+def play(movie, gain=3, fr=120, offset=0, magnification=3,
+    frame_range=[350,1000]):
+    maxmov = np.max(movie)
+    looping=True
+    terminated=False
+    while looping:
+        for t in range(frame_range[0], frame_range[1]):
+            if magnification != 1:
+                frame = cv2.resize(movie[:,:,t],
+                                   None,
+                                   fx=magnification,
+                                   fy=magnification,
+                                   interpolation=cv2.INTER_LINEAR)
+            cv2.imshow('frame', (frame - offset) / maxmov*gain)
+            if cv2.waitKey(int(1. / fr * 1000)) & 0xFF == ord('q'):
+                looping = False
+                terminated = True
+                break
+        if terminated:
+            break
+
+    cv2.waitKey(100)
+    cv2.destroyAllWindows()
+    for i in range(10):
+        cv2.waitKey(100)
     return
 
 

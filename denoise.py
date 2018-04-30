@@ -28,15 +28,17 @@ def spatial(Y_new,
 
 
 def temporal(W,
-             confidence=0.999,
+             confidence=0.99,
+             corr=True,
              dx=1,
              fudge_factor=1,
              greedy=False,
-             maxlag=3,
-             mean_th_factor=1.15,
+             maxlag=10,
+             mean_th_factor=1.0,
              min_rank=1,
              nblocks=[10,10],
-             snr_threshold=2,
+             plot_en=False,
+             snr_threshold=0,
              U_update=False,
              verbose=False):
     """
@@ -45,6 +47,7 @@ def temporal(W,
     #start = time.time()
     mov_d, ranks = tool_grid.denoise_dx_tiles(W,
                                               confidence=confidence,
+                                              corr=corr,
                                               dx=dx,
                                               fudge_factor=fudge_factor,
                                               greedy=greedy,
@@ -52,6 +55,7 @@ def temporal(W,
                                               mean_th_factor=mean_th_factor,
                                               min_rank=min_rank,
                                               nblocks=nblocks,
+                                              plot_en=plot_en,
                                               snr_threshold=snr_threshold,
                                               U_update=U_update,
                                               verbose=verbose)
@@ -60,23 +64,24 @@ def temporal(W,
 
 
 def noise_level(mov_wf,
-                range_ff =[0.25,0.5]):
+                range_ff =[0.25,0.5],
+                method='median'):
     """
     Calculate noise level in movie pixels
     """
     ndim_ = np.ndim(mov_wf)
+
     if ndim_==3:
         dims_ = mov_wf.shape
-        mov_wf = mov_wf.reshape((np.prod(dims_[:2]), dims_[2]),order='F')
-    #noise_level = estimate_noise(mov_wf, summarize='mean')# ** 2
-    #noise_level = noise_estimator.get_noise_fft(mov_wf,
-    #                                                  noise_range=range_ff)[0]
-    #noise_level = estimate_noise(mov_wf, summarize='mean')#[0] #** 2
+        mov_wf = mov_wf.reshape((np.prod(dims_[:2]), dims_[2]))
+    mov_wf = mov_wf - mov_wf.mean(1,keepdims=True)
+    noise_level = noise_estimator.get_noise_fft(mov_wf,noise_range=range_ff)[0]
+    #noise_level = noise_estimator.estimate_noise(mov_wf,                     #           summarize=method)#[0] #** 2
     #print(noise_level.shape)
-    noise_level = noise_estimator.noise_estimator(mov_wf,
-                                                  method='logmexp')#[0]
+    #noise_level = noise_estimator.get_noise_fft(mov_wf,
+    #                                              noise_method=method)[0]
 
     if ndim_ ==3:
-        noise_level = noise_level.reshape(dims_[:2], order='F')
+        noise_level = noise_level.reshape(dims_[:2])
 
     return noise_level
