@@ -75,12 +75,7 @@ def noise_level(mov_wf,
         dims_ = mov_wf.shape
         mov_wf = mov_wf.reshape((np.prod(dims_[:2]), dims_[2]))
     mov_wf = mov_wf - mov_wf.mean(1,keepdims=True)
-    noise_level = noise_estimator.get_noise_fft(mov_wf,noise_range=range_ff)[0]
-    #noise_level = noise_estimator.estimate_noise(mov_wf,                     #           summarize=method)#[0] #** 2
-    #print(noise_level.shape)
-    #noise_level = noise_estimator.get_noise_fft(mov_wf,
-    #                                              noise_method=method)[0]
-
+    noise_level = noise_estimator.get_noise_fft(mov_wf,noise_range=range_ff,noise_method=method)[0]
     if ndim_ ==3:
         noise_level = noise_level.reshape(dims_[:2])
 

@@ -44,6 +44,7 @@ def vector_acov(Vt,
                 extra=1,
                 maxlag=10,
                 mean_th=0.10,
+                l1tf_th =2.25, #.2.25
                 min_rank=0,
                 verbose=False):
     """
@@ -78,9 +79,7 @@ def vector_acov(Vt,
 
     keep = []
     num_components = Vt.shape[0]
-    #print(Vt.shape)
-    #print(np.sqrt(np.sum(Vt**2,1)))
-    if True:
+    if False: # True
         print('mean_th is %s'%mean_th) if verbose else 0
         if iterate:
             for vector in range(0, num_components):
@@ -107,12 +106,12 @@ def vector_acov(Vt,
     # Store extra components
     #print(keep)
     keep2 = []
-    for vi in keep:#range(num_components):#keep:
+    for vi in range(num_components):#keep:
         v_ = Vt[vi, :]
         ntf = norm_TF(v_)/np.sum(np.abs(v_))
         #print('TF norm')
         #print('%d %f' % (vi, ntf))
-        if ntf < 2.25:
+        if ntf < l1tf_th:
             keep2.append(vi)
     keep = keep2
 
@@ -477,7 +476,7 @@ def denoise_patch(M,
                 fudge_factor=1.0,
                 greedy=True,
                 max_num_components=30,
-                max_num_iters=10,
+                max_num_iters=10, #30
                 maxlag=10,
                 mean_th=None,
                 mean_th_factor=1.0,
@@ -573,7 +572,7 @@ def denoise_patch(M,
         dimsM = None
     #M = M.astype('float32')
     #print('greedy here 505')
-    start = time.time()
+    #start = time.time()
     Yd, vtids = denoise_components(M,
                                    dims=dimsM,
                                    confidence=confidence,
@@ -599,7 +598,7 @@ def denoise_patch(M,
     # determine individual rank
     rlen = total_rank(vtids)
 
-    print('\tY rank:%d\trun_time: %f'%(rlen,time.time()-start))
+    #print('\tY rank:%d\trun_time: %f'%(rlen,time.time()-start))
 
     return Yd, rlen
 
@@ -1044,7 +1043,7 @@ def greedy_component_denoiser(Y,
                 U_orig = U_hat.copy()
 
             U_hat, _ = greedy_spatial_denoiser(Y,
-                                               V_TF,#/norm_Vinit,
+                                               V_TF/norm_Vinit,
                                                nus_=nus_,
                                                U=U_hat,
                                                fudge_factor=fudge_factor,
