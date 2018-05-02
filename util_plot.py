@@ -366,6 +366,7 @@ def cn_ranks_plot(ranks,
     return Cplot3
 
 
+
 def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
     """
     Plot comparison for frame idx_ in Y, Y_hat.
@@ -383,16 +384,13 @@ def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0):
 
     for ax_, arr in plots_:
         if np.ndim(arr) > 2:
-            ims = ax_.imshow(arr.reshape(dims, order='F')[:, :, idx_])
+            arr = arr.reshape(dims, order='F')[:, :, idx_]
+            #ims = ax_.imshow(arr.reshape(dims, order='F')[:, :, idx_])
         else:
-            ims = ax_.imshow(arr.reshape(dims[:2], order='F'))
-        #ims = ax_.imshow(arr.reshape(dims,order='F').var(2))
-        d = make_axes_locatable(ax_)
-        cax0 = d.append_axes("bottom", size="5%", pad=0.5)
-        cbar0 = plt.colorbar(
-            ims, cax=cax0, orientation='horizontal', format='%.0e')
-    plt.tight_layout()
-    plt.show()
+            arr = arr.reshape(dims[:2], order='F')                
+        show_img(arr,
+                 ax =ax_,
+                cbar_ticks_number=4)
     return
 
 

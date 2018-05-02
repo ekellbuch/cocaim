@@ -29,98 +29,18 @@ import greedy_spatial
 #from l1_trend_filter.l1_tf_C.c_l1_tf import l1_tf# cython
 
 
-# turn off option for computing mean_th one at a time
-# update metric for mean_th_factor -- default always 1
-# reruns should not denoised top components
-# currently w snr_th_2
+# reruns should not denoised bottom components
 # identify best residual threshold metric
 # better handle components to get better order params
 # add L1 constraint on U
 # update descriptions
 
 
-def vector_acov(Vt,
-                iterate=False,
-                extra=1,
-                maxlag=10,
-                mean_th=0.10,
-                l1tf_th =2.25, #.2.25
-                min_rank=0,
-                verbose=False):
-    """
-    Calculate auto covariance of row vectors in Vt
-    and output indices of vectors which pass correlation null hypothesis.
-    Parameters:
-    ----------
-    Vt:         np.array(k x T)
-                row array of compoenents on which to test correlation null hypothesis
-    mean_th:    float
-                threshold employed to reject components according to correlation null hypothesis
-    maxlag:     int
-                determined lag until which to average ACF of row-vectors for null hypothesis
-    iterate:    boolean
-                flag to include components which pass null hypothesis iteratively
-                (i.e. if the next row fails, no additional components are added)
-    extra:      int
-                number of components to add as extra to components which pass null hypothesis
-                components are added in ascending order corresponding to order in mean_th
-    min_rank:   int
-                minimum number of components that should be included
-                add additional components given components that (not) passed null hypothesis
-    verbose:    boolean
-                flag to enable verbose
-
-    Outputs:
-    -------
-    keep:       list
-                includes indices of components which passed the null hypothesis
-                and/or additional components added given parameters
-    """
-
-    keep = []
-    num_components = Vt.shape[0]
-    if False: # True
-        print('mean_th is %s'%mean_th) if verbose else 0
-        if iterate:
-            for vector in range(0, num_components):
-                # standarize and normalize
-                vi = Vt[vector, :]
-                vi =(vi - vi.mean())/vi.std()
-
-                print('vi ~ (mean: %.3f,var:%.3f)'%(vi.mean(),
-                                                    vi.var())) if verbose else 0
-
-                vi_cov = tools_.axcov(vi,
-                                    maxlag)[maxlag:]/vi.var()
-
-                if vi_cov.mean() < mean_th:
-                    if iterate is True:
-                        break
-                else:
-                    keep.append(vector)
-        else:
-            Vt1 = (Vt-Vt.mean(1,keepdims=True))/Vt.std(1,keepdims=True)
-            means_ =(np.apply_along_axis(tools_.axcov,1,Vt1,maxlag)[:,maxlag:]).mean(1)
-            keep = np.where(means_>mean_th)[0]
-
-    # Store extra components
-    #print(keep)
-    keep2 = []
-    for vi in range(num_components):#keep:
-        v_ = Vt[vi, :]
-        ntf = norm_TF(v_)/np.sum(np.abs(v_))
-        #print('TF norm')
-        #print('%d %f' % (vi, ntf))
-        if ntf < l1tf_th:
-            keep2.append(vi)
-    keep = keep2
-
-    # Forcing one components
-    if np.any(keep) and min_rank > 0:
-        keep = [0]
-        if verbose:
-            print('Forcing one component')
-    return keep
+def synchronization_test(v_, maxlag=100):
+    v_ = (v_-v_.mean())/v_.std()
+    a = tools_.axcov(v_[:1000],maxlag)[maxlag:]
+    a = a/a.max()
+    return a
 
 
 def difference_operator(len_signal):
@@ -157,22 +77,6 @@ def mean_confidence_interval(data,
                             confidence=0.99,
                             one_sided=False):
     """
-    Compute mean confidence interval (CI)
-    for a normally distributed population
-    _____________
-
-    Parameters:
-    ___________
-    data:       np.array  (L,)
-                input vector from which to calculate mean CI
-                assumes gaussian-like distribution
-    confidence: float
-                confidence level for test statistic
-    one_sided:  boolean
-                enforce a one-sided test
-
-    Outputs:
-    _______
     th:         float
                 threshold for mean value at CI
     """
@@ -183,6 +87,75 @@ def mean_confidence_interval(data,
                                 loc =data.mean(),
                                 scale=data.std())
     return th
+
+
+def vector_acov(Vt,
+                iterate=False,
+                extra=1,
+                maxlag=10,
+                maxlag2=100,
+                mean_th=0.10,
+                l1tf_th =2.25, #.2.25
+                min_rank=0,
+                verbose=False):
+    """
+    Calculate auto covariance of row vectors in Vt
+    and output indices of vectors which pass correlation null hypothesis.
+    Parameters:
+    ----------
+    Vt:         np.array(k x T)
+                row array of compoenents on which to test correlation null hypothesis
+    mean_th:    float
+                threshold employed to reject components according to correlation null hypothesis
+    maxlag:     int
+                determined lag until which to average ACF of row-vectors for null hypothesis
+    iterate:    boolean
+                flag to include components which pass null hypothesis iteratively
+                (i.e. if the next row fails, no additional components are added)
+    extra:      int
+                number of components to add as extra to components which pass null hypothesis
+                components are added in ascending order corresponding to order in mean_th
+    min_rank:   int
+                minimum number of components that should be included
+                add additional components given components that (not) passed null hypothesis
+    verbose:    boolean
+                flag to enable verbose
+
+    Outputs:
+    -------
+    keep:       list
+                includes indices of components which passed the null hypothesis
+                and/or additional components added given parameters
+    """
+
+    #keep = []
+    if np.ndim(Vt)==1:
+        Vt = Vt[np.newaxis,:]
+
+    num_components, L = Vt.shape
+
+    D = discrete_diff_operator(L,order=2)
+    D = np.sum(np.abs(D.dot(Vt.T)),0)
+    n1 = np.sum(np.abs(Vt),1)
+    keep = np.argwhere((D/n1)<l1tf_th).flatten()
+
+    keep2 = []
+    if False:
+        for vi in keep:
+            k = synchronization_test(Vt[vi,:])
+            #print('mean %f'%np.mean(k))
+            if np.mean(k)> 0.1:
+                keep2.append(vi)
+
+        keep = keep2
+
+    # Forcing one components
+    if np.any(keep) and min_rank > 0:
+        keep = [0]
+        if verbose:
+            print('Forcing one component')
+    return keep
+
 
 
 def choose_rank(Vt,
@@ -199,78 +172,19 @@ def choose_rank(Vt,
     Select rank vectors in Vt which pass test statistic(s) enabled
     (e.g. axcov and/or kurtosis)
 
-    __________
-    Parameters:
-
-    Vt:         np.array (k x T)
-                array of k temporal components lasting T samples
-    maxlag:     int
-                max correlation lag for correlation null hypothesis in samples
-                (e.g. indicator decay in samples)
-    iterate:    boolean
-                flag to include correlated components iteratively
-    confidence: float
-                confidence interval (CI) for correlation null hypothesis
-    corr:       boolean
-                flag to include components which pass correlation null hypothesis
-    mean_th:    float
-                threshold employed to reject components according to
-                correlation null hypothesis
-    mean_th_factor: float
-                factor to scale mean_th
-                typically set to 2 if greedy=True and mean_th=None or
-                if mean_th has not been scaled yet.
-    min_rank:   int
-                minimum number of components to include in output
-                even if no components of Vt pass any test
-
-    Outputs:
-    -------
-
-    vtid:       np.array (3,d)
-                indicator 3D matrix (corr-kurto-reject) which points which statistic
-                a given component passed and thus it is included.
-                can vary according to min_rank
-
     """
-    if enforce_both:
-        corr = True
-        kurto = True
-
-    if kurto is True:
-        print('deprecated')
     n, L = Vt.shape
     vtid = np.zeros(shape=(3, n)) * np.nan
 
     # Null hypothesis: white noise ACF
-    if corr is True:
-        if mean_th is None:
-            mean_th = wnoise_acov_CI(L,
-                                    confidence=confidence,
-                                    maxlag=maxlag)
-        mean_th*= mean_th_factor
-        keep1 = vector_acov(Vt,
-                            mean_th = mean_th,
-                            maxlag=maxlag,
-                            iterate=iterate,
-                            min_rank=min_rank)
-    else:
-        keep1 = []
-    if kurto is True:
-        keep2 = kurto_one(Vt)
-    else:
-        keep2 = []
-
-    keep = np.union1d(keep1, keep2)
-    loose = list(np.setdiff1d(np.arange(n),keep))
-
-    if enforce_both:
-        keep1 = np.intersect1d(keep1,keep2)
-        keep2 = keep1
+    mean_th*= mean_th_factor
+    keep1 = vector_acov(Vt,
+                        mean_th = mean_th,
+                        maxlag=maxlag,
+                        iterate=iterate,
+                        min_rank=min_rank)
 
     vtid[0, keep1] = 1  # components stored due to cov
-    #vtid[1, keep2] = #0  # components stored due to kurto
-    vtid[2, loose] = 0  # extra components ignored
 
     return vtid
 
@@ -563,6 +477,7 @@ def denoise_patch(M,
 
     if M.min()==0:
         return M
+
     ndim = np.ndim(M)
 
     if np.ndim(M) ==3:
@@ -596,7 +511,7 @@ def denoise_patch(M,
     if ndim ==3:
         Yd = Yd.reshape(dimsM, order='F')
     # determine individual rank
-    rlen = total_rank(vtids)
+    rlen = len(vtids)#total_rank(vtids)
 
     #print('\tY rank:%d\trun_time: %f'%(rlen,time.time()-start))
 
@@ -1176,7 +1091,8 @@ def greedy_component_denoiser(Y,
                     print('did not make the cut based on component variance') if verbose else 0
                 keep1_r = []
             else:
-                ctid_r, _ = find_temporal_component(Vt_r,
+                #ctid_r
+                keep1_r, _ = find_temporal_component(Vt_r,
                                                 confidence=confidence,
                                                 corr=corr,
                                                 maxlag=maxlag,
@@ -1184,8 +1100,8 @@ def greedy_component_denoiser(Y,
                                                 plot_en=plot_en)
 
                 #print('977')
-                keep1_r = np.where(np.logical_or(ctid_r[0, :] == 1,
-                                                ctid_r[1, :] == 1))[0]
+                #keep1_r = np.where(np.logical_or(ctid_r[0, :] == 1,
+                #                                ctid_r[1, :] == 1))[0]
         else:
             print('Residual <= %.3e'%(residual_min_threshold)) if verbose else 0
             keep1_r = []
@@ -1303,7 +1219,48 @@ def greedy_component_denoiser(Y,
     return U_hat , V_TF
 
 
+
 def find_temporal_component(Vt,
+                            confidence=0.99,
+                            corr=True,
+                            iterate=False,
+                            kurto=False,
+                            l1tf_th=2.25,
+                            maxlag=10,
+                            mean_th=None,
+                            mean_th_factor=1,
+                            plot_en=False,
+                            stim_knots=None,
+                            stim_delta=200):
+    """
+    """
+    if np.ndim(Vt)==1:
+        Vt = Vt[np.newaxis,:]
+
+    num_components, L = Vt.shape
+
+    D = discrete_diff_operator(L, order=2)
+    D = np.sum(np.abs(D.dot(Vt.T)),0)
+    n1 = np.sum(np.abs(Vt),1)
+    keep = np.argwhere((D/n1)<l1tf_th).flatten()
+    if False:
+        keep2 = []
+        for vi in keep:
+            k = synchronization_test(Vt[vi,:])
+            #print('mean %f'%np.mean(k))
+            if np.mean(k)> 0.1:
+                keep2.append(vi)
+
+        keep = keep2
+
+    # Plot temporal correlations
+    #print(keep)
+    if plot_en:
+        uplot.plot_vt_cov(Vt, keep, maxlag)
+    return keep, mean_th
+
+
+def find_temporal_component_deprecated(Vt,
                             confidence=0.99,
                             corr=True,
                             iterate=False,
@@ -1322,11 +1279,6 @@ def find_temporal_component(Vt,
                                  maxlag=maxlag)
     mean_th *= mean_th_factor
 
-    #ignore_segments =stimulus_segmentation(Vt.shape[1],
-    #                                       stim_knots=stim_knots,
-    #                                       stim_delta=stim_delta
-    #                                      )
-    #print('th is {}'.format(mean_th))
     ctid = choose_rank(Vt[:,],#~ignore_segments],
                        confidence=confidence,
                        corr=corr,
@@ -1416,7 +1368,7 @@ def denoise_components(data,
                         fudge_factor=1.,
                         greedy=True,
                         maxlag=10,
-                        max_num_components=30,
+                        max_num_components=20,
                         max_num_iters=10,
                         mean_th=None,
                         mean_th_factor=1.,
@@ -1503,13 +1455,14 @@ def denoise_components(data,
                            n_components=max_num_components)
 
     # if greedy Force x2 mean_th (store only big components)
-    if greedy and (mean_th_factor <= 1.):
-        pass
+    #if greedy and (mean_th_factor <= 1.):
+    #    pass
         #mean_th_factor = 2.
 
     # Select components
     #print(np.sqrt(np.sum(Vt**2,1)))
-    ctid, mean_th = find_temporal_component(Vt,
+    #ctid,
+    keep1, mean_th = find_temporal_component(Vt,
                                     confidence=confidence,
                                     corr=corr,
                                     maxlag=maxlag,
@@ -1518,7 +1471,7 @@ def denoise_components(data,
                                     plot_en=plot_en
                                     )
 
-    keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
+    #keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
     #print(keep1)
     # If no components to store, change to lower confidence level
     if np.all(keep1 == np.nan) and mean_th_factor>mean_th_factor2:
@@ -1528,7 +1481,8 @@ def denoise_components(data,
         mean_th /= mean_th_factor
         mean_th_factor = mean_th_factor2
         mean_th *= mean_th_factor
-        ctid, mean_th = find_temporal_component(Vt,
+        #ctid,
+        keep1, mean_th = find_temporal_component(Vt,
                                                 confidence=confidence,
                                                 corr=corr,
                                                 maxlag=maxlag,
@@ -1536,7 +1490,7 @@ def denoise_components(data,
                                                 plot_en=plot_en
                                                 )
 
-        keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
+        #keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
 
     # If no components to store, exit & return min rank
     if np.all(keep1 == np.nan):
@@ -1546,14 +1500,15 @@ def denoise_components(data,
         else:
             min_rank = min_rank
             print('Forcing %d component(s)'%min_rank) if verbose else 0
-            ctid[0, :min_rank]=1
+            #ctid[0, :min_rank]=1
+            keep1 = np.arange(min_rank)
             S = np.eye(min_rank)*s[:min_rank]
             U = U[:,:min_rank]
             Vt = S.dot(Vt[:min_rank,:])
             Yd = U.dot(Vt)
         Yd += mu
         #Yd*= std
-        return Yd, ctid
+        return Yd, keep1
 
     # Select components
     if decimation_flag:
@@ -1663,8 +1618,6 @@ def denoise_components(data,
     else: # al components are high SNR
         pass
         # There are no low SNR components
-        #Residual_components = 0
-        #Denoised_residuals = 0
 
     if greedy:
         try:
@@ -1711,7 +1664,7 @@ def denoise_components(data,
     #ctid[0,:n_comp] = 1
 
     Yd += mu
-    return Yd, ctid
+    return Yd, keep1
 
 
 #########################################################################################

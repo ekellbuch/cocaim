@@ -4,6 +4,9 @@ import scipy.ndimage as ndi
 import scipy.sparse as spr
 
 
+def norm_2(v):
+    return np.sqrt(np.sum(v**2,1))
+
 def kurto_one(x):
     """
     Computer kurtosis of rows of x with 2D (d x T)

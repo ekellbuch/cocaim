@@ -18,6 +18,7 @@ import multiprocessing
 from trefide.temporal import TrendFilter
 from trefide.extras.greedyPCA import choose_rank
 
+#import greedyPCA_SV1 as gpca
 #import greedyPCA_SVS as gpca
 import greedyPCA_SV as gpca
 # Plotting & Video Dependencies
@@ -62,6 +63,7 @@ def denoise_gpca_single(X,
                 greedy=True,
                 max_components=20,
                 maxlag=10,
+                mean_th=1.0,
                 mean_th_factor=1.0,
                  min_rank=1,
                  plot_en=False,
@@ -90,6 +92,7 @@ def denoise_gpca_single(X,
                                                     greedy=greedy,
                                                     maxlag=maxlag,
                                                     max_num_components=max_components,
+                                                    mean_th=mean_th,
                                                     mean_th_factor=mean_th_factor,
                                                     min_rank=min_rank,
                                                     snr_threshold=snr_threshold,
@@ -109,6 +112,7 @@ def denoise_gpca(X,
                 greedy=True,
                 max_components=20,
                 maxlag=10,
+                mean_th=1.0,
                 mean_th_factor=1.0,
                  min_rank=1,
                  plot_en=False,
@@ -140,6 +144,7 @@ def denoise_gpca(X,
                       greedy=greedy,
                       maxlag=maxlag,
                       max_num_components=max_components,
+                      mean_th=mean_th,
                       mean_th_factor=mean_th_factor,
                       min_rank=min_rank,
                       plot_en=plot_en,
