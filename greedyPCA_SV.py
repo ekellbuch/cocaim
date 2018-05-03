@@ -150,7 +150,7 @@ def vector_acov(Vt,
         keep = keep2
 
     # Forcing one components
-    if np.any(keep) and min_rank > 0:
+    if len(keep)==0 and min_rank > 0:
         keep = [0]
         if verbose:
             print('Forcing one component')
@@ -473,10 +473,10 @@ def denoise_patch(M,
                 sum of the ranks of all tiles
     """
     if False:
-        return M, 1
+        return M, 0
 
     if M.min()==0:
-        return M
+        return M, 0
 
     ndim = np.ndim(M)
 
@@ -604,7 +604,7 @@ def l1tf_lagrangian(V_,
             if solver_obj is None:
                 solver_obj = TrendFilter(len(V_))
             solver_obj.lambda_ = lambda_
-            v_ = np.double(V_)
+            v_ = np.double(V_).copy(order='C')
             #norm_v = np.sqrt(np.sum(v_**2))#[np.newaxis,:]
             #v_ = v_/norm_v
             V_TF = solver_obj.denoise(v_,
@@ -648,7 +648,7 @@ def l1tf_constrained(V_hat,
         for ii in range(num_components):
             filt = []
             filt = TrendFilter(len_signal)
-            v_ = np.double(V_hat[ii,:])
+            v_ = np.double(V_hat[ii,:]).copy(order='C')
             V_TF[ii,:] = np.asarray(filt.denoise(v_))
             noise_std_.append(filt.delta)
             if np.sqrt(filt.delta)<=1e-3:
@@ -1093,6 +1093,7 @@ def greedy_component_denoiser(Y,
             else:
                 #ctid_r
                 keep1_r, _ = find_temporal_component(Vt_r,
+                                                     s=s_r,
                                                 confidence=confidence,
                                                 corr=corr,
                                                 maxlag=maxlag,
@@ -1221,6 +1222,7 @@ def greedy_component_denoiser(Y,
 
 
 def find_temporal_component(Vt,
+                            s=None,
                             confidence=0.99,
                             corr=True,
                             iterate=False,
@@ -1231,7 +1233,8 @@ def find_temporal_component(Vt,
                             mean_th_factor=1,
                             plot_en=False,
                             stim_knots=None,
-                            stim_delta=200):
+                            stim_delta=200,
+                           tolerance=1e-3):
     """
     """
     if np.ndim(Vt)==1:
@@ -1243,6 +1246,14 @@ def find_temporal_component(Vt,
     D = np.sum(np.abs(D.dot(Vt.T)),0)
     n1 = np.sum(np.abs(Vt),1)
     keep = np.argwhere((D/n1)<l1tf_th).flatten()
+    
+    # account for low tolerance    
+    # Discard components < tol
+    if s is not None:
+        S = np.diag(s)
+        Vt = S.dot(Vt)
+        #print((np.abs(Vt[keep,:])).max(1))
+        keep = keep[(np.abs(Vt[keep,:])).max(1) > tolerance]
     if False:
         keep2 = []
         for vi in keep:
@@ -1252,9 +1263,8 @@ def find_temporal_component(Vt,
                 keep2.append(vi)
 
         keep = keep2
-
+    
     # Plot temporal correlations
-    #print(keep)
     if plot_en:
         uplot.plot_vt_cov(Vt, keep, maxlag)
     return keep, mean_th
@@ -1274,6 +1284,7 @@ def find_temporal_component_deprecated(Vt,
     """
     """
     if mean_th is None:
+        pass
         mean_th = wnoise_acov_CI(Vt.shape[1],
                                  confidence=confidence,
                                  maxlag=maxlag)
@@ -1370,14 +1381,14 @@ def denoise_components(data,
                         maxlag=10,
                         max_num_components=20,
                         max_num_iters=10,
-                        mean_th=None,
+                        mean_th=0.1,
                         mean_th_factor=1.,
                         mean_th_factor2=1.,
                         min_rank=1,
                         plot_en=False,
                         solver='trefide',
                         snr_components_flag=True,
-                        snr_threshold = 2,
+                        snr_threshold = 0,
                         tsub=1,
                         U_update=False,
                         verbose=False):
@@ -1462,7 +1473,10 @@ def denoise_components(data,
     # Select components
     #print(np.sqrt(np.sum(Vt**2,1)))
     #ctid,
-    keep1, mean_th = find_temporal_component(Vt,
+    if verbose:
+        print('Finding components')
+    keep1, _ = find_temporal_component(Vt,
+                                       s=s,
                                     confidence=confidence,
                                     corr=corr,
                                     maxlag=maxlag,
@@ -1475,19 +1489,18 @@ def denoise_components(data,
     #print(keep1)
     # If no components to store, change to lower confidence level
     if np.all(keep1 == np.nan) and mean_th_factor>mean_th_factor2:
-        #print(mean_th_factor)
-        #print(mean_th_factor2)
         print("Change to lower confidence level") #if verbose else 0
         mean_th /= mean_th_factor
         mean_th_factor = mean_th_factor2
         mean_th *= mean_th_factor
         #ctid,
-        keep1, mean_th = find_temporal_component(Vt,
-                                                confidence=confidence,
-                                                corr=corr,
-                                                maxlag=maxlag,
-                                                mean_th=mean_th,
-                                                plot_en=plot_en
+        keep1, _ = find_temporal_component(Vt,
+                                           s=s,
+                                            confidence=confidence,
+                                            corr=corr,
+                                            maxlag=maxlag,
+                                            mean_th=mean_th,
+                                            plot_en=plot_en
                                                 )
 
         #keep1 = np.where(np.logical_or(ctid[0, :] == 1, ctid[1, :] == 1))[0]
@@ -1511,6 +1524,8 @@ def denoise_components(data,
         return Yd, keep1
 
     # Select components
+    if verbose:
+        print('Decimation')
     if decimation_flag:
         U, Vt = decimation_interpolation(data,
                                         dims=dims,
@@ -1571,7 +1586,7 @@ def denoise_components(data,
                                           fudge_factor=fudge_factor,
                                           U_update=U_update)
 
-            if plot_en and (not dims==None) :
+            if plot_en and (not dims==None):
                 uplot.plot_spatial_component(U,
                                             Y_hat=data,
                                             dims=dims)
@@ -1618,10 +1633,11 @@ def denoise_components(data,
     else: # al components are high SNR
         pass
         # There are no low SNR components
+    
 
     if greedy:
         try:
-            mean_th = mean_th*mean_th_factor2/mean_th_factor
+            #mean_th = mean_th*mean_th_factor2/mean_th_factor
             U, Vt = greedy_component_denoiser(data - Residual_components,
                                             U,
                                             Vt,
