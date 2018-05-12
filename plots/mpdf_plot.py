@@ -30,7 +30,8 @@ def pdf_write(Y,Yd,
     f = plt.figure(figsize=(8.27, 11.69))
     fig_rows = 2
     fig_cols = 1
-    height_ratios=[0.6,0.8]
+    height_ratios=[0.4,0.6]
+
     ##### Figure divisions
     gs0 = gridspec.GridSpec(fig_rows,
                             fig_cols,
@@ -52,17 +53,18 @@ def pdf_write(Y,Yd,
         f.add_subplot(ax1)
         axs.append(ax1)
 
-    mpdf_data.plot_datain(axs,fig_number,subplot_number,
-                            Y,Yd,
-                            nblocks=nblocks,
-                            ranks=ranks,
-                            list_order=list_order,
-                            frame_idx=frame_idx,
-                            pixel_coor1=pixel_coor1,
-                            pixel_coor2=pixel_coor2,
-                            trace_seg=trace_seg,
-                            zoom_box=zoom_box,
-                            plot_colormap=plot_colormap)
+    mpdf_data.plot_datain(axs,fig_number,
+                          subplot_number,
+                        Y,Yd,
+                        nblocks=nblocks,
+                        ranks=ranks,
+                        list_order=list_order,
+                        frame_idx=frame_idx,
+                        pixel_coor1=pixel_coor1,
+                        pixel_coor2=pixel_coor2,
+                        trace_seg=trace_seg,
+                        zoom_box=zoom_box,
+                        plot_colormap=plot_colormap)
 
     subplot_number+=1
     ###### subfigure 2
@@ -77,7 +79,7 @@ def pdf_write(Y,Yd,
     for gs_idx in range(subfig_rows):
         ax4 = plt.Subplot(f, gs01[gs_idx, :])
         f.add_subplot(ax4)
-        ax4.set_yticks([])
+        #ax4.set_yticks([])
 
         mpdf_data.plot_datain(ax4,fig_number,subplot_number,
                     Y,Yd,
@@ -105,9 +107,9 @@ def pdf_write(Y,Yd,
     fig_number = 2
     subplot_number = 1
 
-    f = plt.figure(figsize=(8.27, 11.69))
-    fig_rows, fig_cols = 3, 1
-    height_ratios = [1.1,1,1]#*fig_rows
+    f = plt.figure(figsize=(8.27, 7.79)) #11.69
+    fig_rows, fig_cols = 2, 1 # change to 3 for superpixels
+    height_ratios = [0.4,0.4]#[0.6,0.5,0.5]#*fig_rows
     gs0 = gridspec.GridSpec(fig_rows,
                             fig_cols,
                             height_ratios=height_ratios)

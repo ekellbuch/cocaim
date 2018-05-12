@@ -77,10 +77,14 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
     #bl = min(bl1, bl2)
     #bu = max(bu1, bu2)
 
-    g1trace_ub = max(trace1.max(), trace2.max(), trace3.max()) + trace_offset
-    g1trace_lb = min(trace1.min(), trace2.min(), trace3.min()) - trace_offset
-    g2trace_ub = max(trace4.max(), trace5.max(), trace6.max()) + trace_offset
-    g2trace_lb = min(trace4.min(), trace5.min(), trace6.min()) - trace_offset
+    g1trace_ub = max(trace1.max(), trace2.max(), trace3.max())
+    g1trace_lb = min(trace1.min(), trace2.min(), trace3.min())
+    g2trace_ub = max(trace4.max(), trace5.max(), trace6.max())
+    g2trace_lb = min(trace4.min(), trace5.min(), trace6.min())
+
+    n_ticks = 3
+    y_ticks1 = np.linspace(g1trace_lb,g1trace_ub,n_ticks)
+    y_ticks2 = np.linspace(g2trace_lb,g2trace_ub,n_ticks)
 
     trace_ub = max(g1trace_ub, g2trace_ub)
     trace_lb = min(g1trace_lb, g2trace_lb)
@@ -102,32 +106,37 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                 extract_frame(R,al,au,bl,bu,frame_idx)]
 
             d1,d2= cin[0].shape
-            
+            frame_str=str(frame_idx-trace_seg[0])+' '
+            mov_type =['Raw','Denoised','Residual']
+            titles_=[frame_str + each_title for each_title in mov_type]
             util_plot.comparison_plot(cin,
                                       plot_show=False,
                                       option='input',
                                       axarr=ax,
+                                      titles_=titles_,
                                       cbar_enable=True,
                                       cbar_share=True,
                                       plot_aspect='auto')
-  
+
             for myax in ax[:3]:
                 myax.scatter(b1-bl,
                             au-a1,
-                            c='red',
+                            edgecolors='k',
                             marker='o',
+                            lw=2,
                             facecolors='None')
 
                 myax.scatter(b2-bl,
                             au-a2,
-                            c='red',
+                            edgecolors='dimgray',
                             marker='o',
+                            lw=2,
                             facecolors='None')
 
 
             for myax in ax[:3]:
                 myax.set_xticks([])
-                myax.set_yticks([])
+                #myax.set_yticks([])
 
         # Traces
         elif cplot_row==2:
@@ -178,10 +187,14 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
         if cplot_row == 2:
             _=util_plot.cn_ranks_plot(ranks,
                                     dims=dims,
+                                    cbar_pad=0.1,
+                                    cbar_size="3%",
                                     nblocks=nblocks,
                                     ax3=ax,
                                     grid_cut=[al,au,bl,bu],
+                                    #cbar_halignment='right',
                                     cbar_orientation='vertical',
+                                    cbar_direction='left',
                                     plot_aspect='auto',
                                     fig_cmap='YlGnBu',
                                     text_en=False)
@@ -202,12 +215,12 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                                 cbar_share=True,
                                 titles_=['Raw','Residual'],
                                 axarr=ax)
-            
+
             for myax in ax[:2]:
                 myax.set_xticks([])
                 myax.set_yticks([])
 
-            
+
 
         elif cplot_row ==4:
             Y1=Y[al:au,bl:bu,:]

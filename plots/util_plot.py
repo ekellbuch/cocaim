@@ -42,9 +42,7 @@ def colorbar(mappable,
         cax = divider.append_axes(cbar_direction,
                                 size="5%",
                                 pad=0.03)
-    #else:
-    #    if cbar_orientation =='horizontal':
-    #        cax.set_xticks
+
 
     cbar = plt.colorbar(mappable,
                         cax=cax,
@@ -52,6 +50,9 @@ def colorbar(mappable,
                         spacing='uniform',
                         format=format_tile,
                         ticks=cbar_ticks)
+    if np.all([ tick == int(tick) for tick in cbar.get_ticks()]):
+        cbar.set_ticks(list(map(int,cbar.get_ticks())))
+        cbar.set_ticklabels(list(map(str,cbar.get_ticks())))
     return #fig.colorbar(mappable, cax=cax)
 
 
@@ -133,6 +134,8 @@ def show_img(img,
                         format=format_tile,
                         ticks=cbar_ticks)
 
+    if np.all([ tick == int(tick) for tick in cbar.get_ticks()]):
+        cbar.set_ticks(list(map(int,cbar.get_ticks())))
     if fig_pdf_var is not None:
         fig_pdf_var.savefig()
         plt.close()
@@ -153,10 +156,12 @@ def comparison_metric(array,
 
         title_prefix = 'Local correlation: '
     elif option =='var': #Variance
-        Cn = array.var(2)/array.shape[2]
+        if not cbar_share:
+            Cn = array.var(2)/array.shape[2]
+        else:
+            Cn = array
         title_prefix = 'Pixel variance: '
-        #print(Cn.min())
-        #print(Cn.max())
+
     elif option =='pnr': # PNR
         _, Cn = correlation_pnr(array,
                                 remove_small_val=remove_small_val,
@@ -170,7 +175,7 @@ def comparison_metric(array,
             Cn = Cn/Cn.max()
         else:
             Cn = array
-        title_prefix = 'Single Frame: '
+        title_prefix = 'Frame: '
 
     elif option=='snr':
         Cn1 = array.std(2)
@@ -240,9 +245,6 @@ def comparison_plot(cn_see,
         if len(titles_) < num_plots:
             titles_.append('Residual')
 
-    #if cbar_share and cbar_enable and axarr is None:
-    #    num_plots +=1
-
     #-----------------------------
     # Plot characteristics
 
@@ -275,11 +277,9 @@ def comparison_plot(cn_see,
     x_ticks = np.linspace(0,dim1,5).astype('int')
     y_ticks = np.linspace(0,dim2,5).astype('int')
 
-   #width_ratios_=[1,1,1]
     if axarr is None:
         fig, axarr = plt.subplots(d1,d2,
                                   figsize=(d1*plot_size,d2*plot_size),
-                                  #gridspec_kw={"width_ratios":width_ratios_},
                                   sharex=sharex,
                                   sharey=sharey)
 
@@ -308,7 +308,6 @@ def comparison_plot(cn_see,
 
     if cbar_share:
         if cbar_enable:
-
             if len(axarr)>len(cn_see):
                 cax = axarr[-1]
             else:
@@ -328,7 +327,6 @@ def comparison_plot(cn_see,
             plt.savefig()
         else:
             fig_pdf_var.savefig()#fig
-            #return fig
         plt.close()
     else:
         if plot_show:
@@ -376,7 +374,6 @@ def extract_superpixels(Yd,
     unique_pix = np.asarray(np.sort(np.unique(connect_mat_1))[1:]);
     pure_pix = [];
 
-    #print("find pure superpixels!")
     for kk in range(num_patch):
         pos = np.where(patch_ref_mat==kk);
         up=pos[0][0]*patch_height;
@@ -435,13 +432,7 @@ def superpixel_plotpixel(connect_mat_1,
                     color='white',
                     fontsize=15,
                     fontweight="bold")
-        #plt.show()
-    #ax1.set(title="Pure superpixels")
-    #ax1.title.set_fontsize(15)
-    #ax1.title.set_fontweight("bold")
-    #plt.tight_layout()
-    #plt.show();
-    return #0#fig
+    return
 
 
 def superpixel_component(Yd,
@@ -729,10 +720,14 @@ def cn_ranks_plot(ranks,
                 offset_case=None,
                 list_order='C',
                 exclude_max=True,
-                max_rank=100,
+                max_rank=1e8,
                 fontsize=20,
                 figsize=15,
+                cbar_direction=None,
                 cbar_orientation='horizontal',
+                cbar_size="3%",
+                cbar_pad=0.05,
+                cbar_halignment=None,
                 interpolation=None,
                 fig_cmap='YlGnBu',
                 fig_pdf_var=None,
@@ -787,8 +782,8 @@ def cn_ranks_plot(ranks,
     num_pixels = np.prod(dims[:2])
     rank_sum  = np.sum(np.asarray(ranks_))
     compress_ratio = num_pixels/rank_sum
-    title_ = 'Compression ratio %.2f\n(Pixels: %d, Rank sum %d)'%(
-                    compress_ratio,num_pixels,rank_sum)
+    title_ = 'Compression ratio %.2f'%(
+                    compress_ratio)#,num_pixels,rank_sum)
     ax3.set_title(title_)
 
     if grid_cut is not None:
@@ -805,22 +800,30 @@ def cn_ranks_plot(ranks,
                     interpolation=interpolation)
 
 
-    if cbar_orientation == 'horizontal':
-        cbar_direction ='bottom'
-    elif cbar_orientation == 'vertical':
-        cbar_direction ='right'
+    if cbar_direction is None:
+        if cbar_orientation == 'horizontal':
+            cbar_direction ='bottom'
+        elif cbar_orientation == 'vertical':
+            cbar_direction ='right'
+
+
 
     divider3 = make_axes_locatable(ax3)
     cax3 = divider3.append_axes(cbar_direction,
-                                size="3%",
-                                pad=0.05)
-    plt.colorbar(im3,
+                                size=cbar_size,
+                                pad=cbar_pad)
+    cbar = plt.colorbar(im3,
                 cax=cax3,
                 format='%d',
                 orientation=cbar_orientation,
                 spacing='uniform',
                 ticks=np.linspace(vmin_,
                 vmax_, 5))
+
+    cbar.ax.yaxis.set_label_position(cbar_direction)
+    cbar.ax.yaxis.set_ticks_position(cbar_direction)
+    cbar.ax.set_yticklabels(cbar.ax.get_yticklabels(),ha='center')
+    cbar.ax.yaxis.set_tick_params(pad=6)
 
 
     if text_en:
