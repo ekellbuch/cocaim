@@ -57,6 +57,7 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
     sup_background = False
     sup_lowrank = False
     sup_hals = False
+    sup_text = False
     # ----------------------
     dims = Y.shape
     R = Y-Yd
@@ -67,8 +68,8 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
     trace1, trace2,trace3 = trace_extract(Y,Yd,R,a1,b1,trace_seg=trace_seg)
     trace4, trace5,trace6 = trace_extract(Y,Yd,R,a2,b2,trace_seg=trace_seg)
 
-    #al1, au1, bl1, bu1 = box_lim(a1, b1, dims, zoom_box=zoom_box)
     al, au, bl, bu = box_lim(a1, b1, dims, zoom_box=zoom_box)
+    #al1, au1, bl1, bu1 = box_lim(a1, b1, dims, zoom_box=zoom_box)
     #al2, au2, bl2, bu2 = box_lim(a2, b2, dims, zoom_box=zoom_box)
 
     #al = min(al1, al2)
@@ -83,8 +84,11 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
 
     trace_ub = max(g1trace_ub, g2trace_ub)
     trace_lb = min(g1trace_lb, g2trace_lb)
-    #verts = list(zip([-1., 1., 1., -1.], [-1., -1., 1., -1.]))
 
+    trace_color_raw ='dimgray'
+    trace_color_denoised ='navy'
+    trace_line_style = '-'
+    #trace_yticks_num = 3
 
     # Plot variables
 
@@ -98,19 +102,6 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                 extract_frame(R,al,au,bl,bu,frame_idx)]
 
             d1,d2= cin[0].shape
-            for myax in ax[:3]:
-                myax.plot(b1-bl,#d2-(a1-bl),
-                          a1-al,#d1-(a1-al),
-                          c='red',
-                          marker='o',
-                          mfc="None",
-                         markeredgewidth=2)
-                myax.plot(b2-bl,#d2-(b1-bl)-(b1-b2),
-                          a2-al,#d1-(a1-al)+(a1-a2),
-                          c='red',
-                          marker='o',
-                          mfc="None",
-                         markeredgewidth=2)
             
             util_plot.comparison_plot(cin,
                                       plot_show=False,
@@ -121,31 +112,47 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                                       plot_aspect='auto')
   
             for myax in ax[:3]:
+                myax.scatter(b1-bl,
+                            au-a1,
+                            c='red',
+                            marker='o',
+                            facecolors='None')
+
+                myax.scatter(b2-bl,
+                            au-a2,
+                            c='red',
+                            marker='o',
+                            facecolors='None')
+
+
+            for myax in ax[:3]:
                 myax.set_xticks([])
                 myax.set_yticks([])
 
+        # Traces
         elif cplot_row==2:
-            # Trace point 1
-            ax.plot(trace1, c='dimgray',ls='-')
-            ax.plot(trace2, c='navy',ls='-')
+            ax.plot(trace1, c=trace_color_raw,ls=trace_line_style)
+            ax.plot(trace2, c=trace_color_denoised,ls=trace_line_style)
+            #vmin =
             ax.set_xticks([])
 
         elif cplot_row ==3:
-            ax.plot(trace3, c='dimgray',ls='-')
+            ax.plot(trace3, c=trace_color_raw,ls=trace_line_style)
             ax.set_xticks([])
-            ax.set_yticklabels([])
+            #ax.set_yticklabels([])
 
         elif cplot_row ==4:
-            ax.plot(trace4, c='dimgray',ls='-')
-            ax.plot(trace5, c='navy',ls='-')
+            ax.plot(trace4, c=trace_color_raw,ls=trace_line_style)
+            ax.plot(trace5, c=trace_color_denoised,ls=trace_line_style)
             ax.set_xticks([])
-            ax.set_yticklabels([])
+            #ax.set_yticklabels([])
 
         elif cplot_row ==5:
-            ax.plot(trace6, c='dimgray',ls='-')
-            ax.set_xlabel('frames')
-            ax.set_yticklabels([])
+            ax.plot(trace6, c=trace_color_raw,ls=trace_line_style)
+            ax.set_xlabel('Frames')
+            #ax.set_yticklabels([])
         return
+
     ####################
     #################### PAGE 2
     ####################
@@ -163,7 +170,6 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                                       cbar_share=True,
                                       #cbar_ticks_number=cbar_ticks_number,
                                       plot_colormap=plot_colormap,
-                                      #cbar_orientation='vertical',
                                       plot_aspect='auto')
             for myax in ax[:3]:
                 myax.set_xticks([])
@@ -182,14 +188,11 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
             ax.set_xticks([])
             ax.set_yticks([])
 
-
         elif cplot_row == 3:
             Y1=Y[al:au,bl:bu]
             R1=R[al:au,bl:bu]
 
             util_plot.comparison_plot([Y1,R1],
-                               #vmin=vmin,
-                               #vmax=vmax,
                                 plot_show=False,
                                 plot_aspect='auto',
                                 plot_add_residual=False,
@@ -223,7 +226,7 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                                             plot_aspect='auto',
                                             plot_colormap=plot_colormap,
                                             ax1=ax,
-                                            text=False)
+                                            text=sup_text)
 
             ax.set_title('Raw\n(Cut %.1f,Len %d)'%(sup_cut_off_point1,
                                                 sup_length_cut))
@@ -245,7 +248,7 @@ def plot_datain(ax,page_count,cplot_row,Y,Yd,nblocks=None,ranks=None,
                                             ax1=ax,
                                             plot_aspect='auto',
                                             plot_colormap=plot_colormap,
-                                            text=False)
+                                            text=sup_text)
             ax.set_title('Denoised\n(Cut %.1f,Len %d)'%(sup_cut_off_point2,
                                                 sup_length_cut))
         else:
