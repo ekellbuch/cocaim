@@ -1,13 +1,14 @@
 # Implement spatial filter for each pixel
+#import matplotlib as mpl
+#mpl.use('Agg')
+import matplotlib.pyplot as plt
 
 import numpy as np
-#import caiman as cm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib.pyplot as plt
 import scipy as sp
 
-import noise_estimator
-import util_plot
+from . import denoise
+from .plots import util_plot
 
 
 def covariance_matrix(Y):
@@ -29,7 +30,7 @@ def spatial_filter_image(Y_new, gHalf=[2,2], sn=None):
     """
     mean_ = Y_new.mean(axis=2,keepdims=True)
     if sn is None:
-        sn,_= noise_estimator.get_noise_fft(Y_new - mean_)
+        sn = denoise.noise_level(Y_new - mean_,method='logmexp')
         if 0:
             plt.title('Noise level per pixel')
             plt.imshow(sn)
@@ -41,12 +42,12 @@ def spatial_filter_image(Y_new, gHalf=[2,2], sn=None):
     maps = [Cnb.min(), Cnb.max()]
 
     Y_new2 = Y_new.copy()
-    Y_new3 = np.zeros(Y_new.shape)#Y_new.copy()
+    Y_new3 = np.zeros(Y_new.shape)
 
     d = np.shape(Y_new)
     n_pixels = np.prod(d[:-1])
 
-    center = np.zeros((n_pixels,2)) #2D arrays
+    center = np.zeros((n_pixels,2))
 
     k_hats=[]
     for pixel in np.arange(n_pixels):

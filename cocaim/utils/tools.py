@@ -1,6 +1,39 @@
 import numpy as np
 import scipy as sp
 
+
+def norm_TF(x,order=2):
+    L = len(x)
+    D = discrete_diff_operator(L,order=order)
+    tf_norm = norm_1(D.dot(x))
+    return tf_norm
+
+def norm_1 (x):
+    return np.sum(np.abs(x))
+
+def discrete_diff_operator(L,order=2):
+    """
+    Returns discrete difference operator
+    of order k+1
+    where D(k+1) [n-k-1] x n
+    """
+    
+    if order ==1:
+        #assert L > 0
+        D = (np.diag(np.ones(L-1)*1, 1)
+             +np.diag(np.ones(L)*-1))[:(L-1),:]
+    elif order ==2:
+        #assert L > 1
+        D = (np.diag(np.ones(L-1)*-2, 1)
+            +np.diag(np.ones(L)*1)
+            +np.diag(np.ones(L-2),2))[:(L-2),:]
+    return D
+
+
+def z_score(x):
+    z = (x - np.mean(x))/np.std(x)
+    return z
+
 def remove_trend(Y_rm,detrend_option='linear'):
     mean_pixel = Y_rm.mean(axis=1, keepdims=True)
     Y_rm2 = Y_rm - mean_pixel

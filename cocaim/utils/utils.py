@@ -4,6 +4,22 @@ import scipy.ndimage as ndi
 import scipy.sparse as spr
 
 
+def norm_2(v):
+    return np.sqrt(np.sum(v**2,1))
+
+def kurto_one(x):
+    """
+    Computer kurtosis of rows of x with 2D (d x T)
+    Outputs: idx of components with kurtosis > population mean + std
+    """
+    # Compute kurtosis
+    kurt = sp.stats.kurtosis(x, axis=1, fisher=True, bias=True)
+    # keep component wrt mean + std
+    kurt_th = kurt.mean() + kurt.std()
+    keep = np.where(kurt > kurt_th)[0].tolist()
+    return keep
+
+
 def butter_highpass(signals, cutoff, fs, order=6, axis=-1):
     """ Forward-backward filter inpute signals with butterworth kernel"""
     return sps.filtfilt(*sps.butter(order,

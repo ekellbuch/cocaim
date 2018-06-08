@@ -13,6 +13,40 @@ import skvideo.io
 import util_plot
 import cv2
 
+
+def movie_trial1(Yd4r):
+    Yd_1 = Yd4r.transpose([2,0,1]);
+    Yd_1 = Yd_1 - Yd_1.min(axis=0, keepdims=True);
+    Yd_1 = (Yd_1 - Yd_1.min())/(Yd_1.max() - Yd_1.min());
+
+    plt.hist(np.clip(Yd_1,0,0.2).ravel()) # trim outliers based on histogram, clip value may change
+    Yd_1 = np.clip(Yd_1,0,0.12);
+
+    Yd_1 = (Yd_1 - Yd_1.min())/(Yd_1.max() - Yd_1.min());
+
+    import matplotlib.animation as animation
+
+    fig = plt.figure(figsize=(24,3));
+    ax1 = plt.subplot(1,1,1)
+    ax1.set(title=“Denoised data”)
+    ax1.title.set_fontsize(15)
+    ax1.title.set_fontweight(“bold”)
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+    plt.tight_layout()
+
+    img1 = ax1.imshow(Yd_1[0,:,:],vmin=Yd_1.min(),vmax=Yd_1.max(),cmap=“Greys_r”);
+    divider = make_axes_locatable(ax1)
+    cax = divider.append_axes('right', size='5%', pad=0.1)
+    plt.colorbar(img1, cax=cax,orientation=‘vertical’,spacing=uniform’)
+
+    def update(i):
+        img1.set_data(Yd_1[i+1,:,:]);
+    return [img1]
+
+ani = animation.FuncAnimation(fig, update, frames=dims[2]-1, blit=True);
+ani.save(out_dir + 'den.mp4', fps=60)
+
 def movie_writer(mov,
                 mov_den,
                 fname_out_movie,
