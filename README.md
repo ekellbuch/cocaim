@@ -11,4 +11,4 @@ Dataset from https://github.com/simonsfoundation/CaImAn
 Dependencies:
 1. [TREFIDE](https://github.com/ikinsella/trefide)
 2. [CVXPY](https://cvxgrp.github.io/cvxpy/install/index.html)
-3. [CVXOPT](http://cvxopt.org/).
+3. [CVXOPT](http://cvxopt.org/)
