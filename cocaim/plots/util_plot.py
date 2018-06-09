@@ -84,6 +84,7 @@ def digits(f):
     """
     return len(str(f).split('.')[1].rstrip('0'))
 
+
 def show_img(img,
              ax=None,
              vmin=None,
@@ -261,13 +262,12 @@ def comparison_plot(cn_see,
                     fig_pdf_var=None,
                     remove_small_val_th=3,
                     remove_small_val=False,
-                    plot_size = 6,
+                    plot_size = 10,
                     save_fig=False,
                     save_fig_name='corr_'):
     """
     """
     num_plots = len(cn_see)
-
 
     if num_plots == 2 and plot_add_residual:
         cn_see.append(cn_see[0] - cn_see[1])
@@ -715,6 +715,7 @@ def cn_ranks_sum_plot(ranks,
              cbar_enable=True)
     return
 
+
 def cn_ranks_dx_plot(ranks,
                     dims,
                     nblocks=[10, 10],
@@ -922,7 +923,6 @@ def cn_ranks_plot(ranks,
     #else:
         #plt.show()
     return Cplot3
-
 
 
 def plot_comp(Y, Y_hat=None, title_=None, dims=None, idx_=0,dim_order='F'):

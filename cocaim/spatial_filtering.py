@@ -1,6 +1,4 @@
 # Implement spatial filter for each pixel
-#import matplotlib as mpl
-#mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 import numpy as np

@@ -30,6 +30,7 @@ def noise_estimator(Y,range_ff=[0.25,0.5],method='logmexp'):
         sns = sns.reshape(dims[:2],order='F')
     return sns
 
+
 def fft_estimator(signal, freq_range=[0.25, 0.5], max_samples=3072):
     """
     High frequency components of FFT of the input signal
@@ -74,6 +75,7 @@ def fft_estimator(signal, freq_range=[0.25, 0.5], max_samples=3072):
     psdx = (np.divide(1., len_signal)) * (xdft**2)
     psdx[1:] *= 2
     return np.divide(psdx[idx[:psdx.shape[0]]], 2)
+
 
 def pwelch_estimator(signal, freq_range=[0.25, 0.5]):
     """
