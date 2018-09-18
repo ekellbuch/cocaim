@@ -4,7 +4,7 @@ Compression and denoising of Calcium and other functional Imaging recordings
 Dataset from https://github.com/simonsfoundation/CaImAn
 
 ## Comments:
-1. Runs in python3
+1. Runs in python3 or matlab (matlab code in 'matlab' folder)
 2. We assume the data is motion corrected and detrended by your method of choice.
 
 ## Dependencies
